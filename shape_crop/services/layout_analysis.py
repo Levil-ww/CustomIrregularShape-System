@@ -41,6 +41,14 @@ def boundary_depth(pixels):
                 _, period = extract_period(pixels[row:end, columns[0]:columns[-1] + 1])
                 if period:
                     continue
+                # A sentence is not periodic. Keep sparse ink on the preceding
+                # flat background when it is enclosed by another flat row.
+                # Dense/non-periodic artwork must still stop the edge scan.
+                background = median[row - 1]
+                matches = np.max(np.abs(rows[row:end] - background), axis=2) <= 18
+                enclosed = np.max(np.abs(median[end] - background)) <= 18
+                if enclosed and np.mean(matches) >= .45 and np.min(np.mean(matches, axis=1)) >= .25:
+                    continue
             depth = row
             break
     return depth or 0
@@ -51,10 +59,35 @@ def analyze_layout(image):
         image = image.transpose(Image.Transpose.ROTATE_90)
     pixels = np.asarray(image)
     height, width = pixels.shape[:2]
-    depth = boundary_depth(pixels)
-    bottom = height - boundary_depth(pixels[::-1])
-    left = boundary_depth(pixels.transpose(1, 0, 2))
-    right = width - boundary_depth(pixels[:, ::-1].transpose(1, 0, 2))
+    # Scan at a bounded spatial scale. At print resolution thin floral strokes
+    # leave many individually flat rows and can delay the transition by thousands
+    # of pixels. Only recognition is reduced; all extracted pixels stay original.
+    probe = image.copy() if max(width, height) > 2400 else image
+    if probe is not image:
+        probe.thumbnail((2400, 2400), Image.Resampling.LANCZOS)
+    detected = np.asarray(probe)
+
+    def edge(full, small):
+        found = boundary_depth(small)
+        if not found:
+            return 0
+        ratio = full.shape[0] / small.shape[0]
+        estimate = round(found * ratio)
+        if ratio == 1:
+            return estimate
+        # Locate the colour separator at native resolution near the estimate.
+        radius = max(2, int(np.ceil(2 * ratio)))
+        lo, hi = max(1, estimate - radius), min(full.shape[0] - 1, estimate + radius)
+        columns = np.linspace(full.shape[1] * .25, full.shape[1] * .75 - 1, 384).astype(int)
+        colours = np.median(full[lo - 1:hi + 1, columns].astype(np.float32), axis=1)
+        changes = np.max(np.abs(np.diff(colours, axis=0)), axis=1)
+        strongest = int(np.argmax(changes))
+        return lo + strongest if changes[strongest] > 20 else estimate
+
+    depth = edge(pixels, detected)
+    bottom = height - edge(pixels[::-1], detected[::-1])
+    left = edge(pixels.transpose(1, 0, 2), detected.transpose(1, 0, 2))
+    right = width - edge(pixels[:, ::-1].transpose(1, 0, 2), detected[:, ::-1].transpose(1, 0, 2))
     top = depth
     if right <= left or bottom <= top:
         raise ValueError('原素材内容区识别失败，四边边框已占满图片')

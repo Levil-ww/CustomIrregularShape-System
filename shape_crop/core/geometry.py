@@ -140,3 +140,33 @@ def create_shape(design):
     if design.shape_mode != 'circular':
         raise ValueError('未知轮廓模块')
     return CircularBand(design.diameter_cm, design.height_cm)
+
+
+def inset_boundary_fraction(shape, x, y, depth, reference=None):
+    """Continuous perimeter coordinate on each pixel's parallel contour.
+
+    Projecting an entire thick band onto one fixed contour repeats/truncates
+    glyphs near the straight/arc joints. Each radial row has its own joint.
+    """
+    center = shape.center if isinstance(shape, ArcBand) else 0.
+    radius = shape.radius - depth
+    half_h = shape.half_height - depth
+    angle = np.arcsin(np.clip(half_h / radius, 0, 1))
+    chord = 2 * (center + np.sqrt(np.maximum(0, radius**2 - half_h**2)))
+    arc_length = 2 * radius * angle
+    # Anchor each straight/arc section independently. Scaling the whole perimeter
+    # would accumulate a radial phase shift and turn straight text into italics.
+    ref_chord = reference.chord if reference is not None else chord
+    ref_arc = 2 * reference.radius * reference.angle if reference is not None else arc_length
+    perimeter = 2 * ref_chord + 2 * ref_arc
+    theta = np.arctan2(y, np.abs(x) - center)
+    radial_depth = shape.radius - np.hypot(np.abs(x) - center, y)
+    on_line = shape.half_height - np.abs(y) <= radial_depth
+    top = np.clip(x / np.maximum(chord, 1e-6) + .5, 0, 1) * ref_chord
+    bottom = ref_chord + ref_arc + np.clip(.5 - x / np.maximum(chord, 1e-6), 0, 1) * ref_chord
+    phase = (np.clip(theta, -angle, angle) + angle) / (2 * angle)
+    right = ref_chord + phase * ref_arc
+    left = 2 * ref_chord + ref_arc + (1 - phase) * ref_arc
+    coordinate = np.where(on_line, np.where(y <= 0, top, bottom),
+                          np.where(x >= 0, right, left))
+    return (coordinate / perimeter) % 1

@@ -1,4 +1,4 @@
-"""One centred, uniform original-image transform. Never synthesize or reflect content."""
+"""One centred, uniform cover transform. Never synthesize or reflect content."""
 from dataclasses import dataclass
 from shape_crop.core.sampling import sample
 
@@ -12,9 +12,13 @@ class ContentMapping:
     top: int
 
     @staticmethod
+    def source_scale(layout, diameter_cm, height_cm):
+        return max(diameter_cm / layout.width_px, height_cm / layout.height_px)
+
+    @staticmethod
     def required_border(layout, diameter_cm, height_cm):
         """Minimum symmetric frame that covers all four original rectangular edges."""
-        scale = diameter_cm / layout.width_px
+        scale = ContentMapping.source_scale(layout, diameter_cm, height_cm)
         left, top, right, bottom = layout.content_box_px
         return max(left * scale, (layout.width_px - right) * scale,
                    (height_cm - layout.height_px * scale) / 2 + top * scale,
@@ -23,7 +27,7 @@ class ContentMapping:
 
     @classmethod
     def create(cls, layout, diameter_cm, height_cm, border_cm):
-        scale = diameter_cm / layout.width_px
+        scale = cls.source_scale(layout, diameter_cm, height_cm)
         left, top, right, bottom = layout.content_box_px
         half_w, half_h = diameter_cm / 2 - border_cm, height_cm / 2 - border_cm
         tolerance = .75 * scale

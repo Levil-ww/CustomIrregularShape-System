@@ -1,7 +1,7 @@
 """Source-faithful layout renderer: one scale for both original borders and floral content."""
 import numpy as np
 from PIL import Image
-from shape_crop.core.geometry import create_shape
+from shape_crop.core.geometry import create_shape, inset_boundary_fraction
 from shape_crop.core.sampling import sample_perimeter_strip
 from shape_crop.core.content_mapping import ContentMapping
 from shape_crop.core.renderer import RenderCancelled, blend
@@ -14,11 +14,12 @@ def render_source(design, material, inner_material=None, max_side=None, progress
         raise ValueError('当前导出超过 1.8 亿像素，请降低 DPI 或尺寸')
     layout = material.source_layout
     shape = create_shape(design)
-    # Width fixes the original artwork scale; height only selects a centred crop.
-    scale = design.diameter_cm / layout.width_px
+    # One uniform scale covers both target dimensions; do not stretch the frame
+    # to compensate for missing source height.
+    scale = ContentMapping.source_scale(layout, design.diameter_cm, design.height_cm)
     border_cm = layout.border_depth_px * scale
     # Use one symmetric frame width covering all original edges and the size allowance.
-    # Every frame layer shares this radial scale; the artwork transform remains fixed.
+    # Every frame layer shares this radial scale; artwork uses one uniform transform.
     required_border = ContentMapping.required_border(layout, design.diameter_cm, design.height_cm)
     if layout.border_depth_px:
         border_cm = max(border_cm, required_border)
@@ -28,7 +29,7 @@ def render_source(design, material, inner_material=None, max_side=None, progress
         raise ValueError('内圆超出自动识别的外边框内侧')
     mapping = ContentMapping.create(layout, design.diameter_cm, design.height_cm, border_cm)
     px_cm = max(design.diameter_cm / width, design.height_cm / height)
-    ring = shape
+    ring = shape.inset(border_cm / 2) if border_cm else shape
     strip_width = layout.strip.shape[1]
     origin = (strip_width - ring.chord / scale) / 2
     x = ((np.arange(width, dtype=np.float32) + .5) / width - .5)[None, :] * design.diameter_cm
@@ -43,11 +44,12 @@ def render_source(design, material, inner_material=None, max_side=None, progress
         depth = shape.depth(x, y)
         rgb = mapping.sample(layout, x, y)
         if border_cm:
-            # Only frame layers use a symmetric coordinate. Flower sampling retains signed y.
-            s = ring.boundary_coordinate(x, -np.abs(y))
+            # Continuous clockwise coordinates rotate the lower text by 180 degrees.
+            # A reflected y coordinate would mirror every glyph on the lower half.
+            s = inset_boundary_fraction(shape, x, y, np.clip(depth, 0, border_cm), ring) * ring.perimeter
             frame_scale = border_cm / layout.border_depth_px
             stripe = sample_perimeter_strip(layout.strip, s, np.maximum(0, depth / frame_scale - .5),
-                                             shape.perimeter, scale, origin)
+                                             ring.perimeter, scale, origin)
             blend(rgb, stripe, cov(border_cm - depth))
         if design.inner_diameter_cm:
             radius = design.inner_diameter_cm / 2
@@ -65,7 +67,7 @@ def render_source(design, material, inner_material=None, max_side=None, progress
             if inner_band >= radius:
                 raise ValueError('内圆尺寸小于原素材边框宽度')
             if inner_band:
-                arc = ((np.arctan2(-np.abs(y), x) + np.pi / 2) % (2 * np.pi)) * max(radius - inner_band / 2, .001)
+                arc = ((np.arctan2(y, x) + np.pi / 2) % (2 * np.pi)) * max(radius - inner_band / 2, .001)
                 inner_perimeter = 2 * np.pi * max(radius - inner_band / 2, .001)
                 stripe = sample_perimeter_strip(inner_layout.strip, arc,
                                                 np.maximum(0, inner_depth / inner_scale - .5),
