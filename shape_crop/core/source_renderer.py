@@ -1,7 +1,7 @@
 """Source-faithful layout renderer: one scale for both original borders and floral content."""
 import numpy as np
 from PIL import Image
-from shape_crop.core.geometry import CircularBand
+from shape_crop.core.geometry import create_shape
 from shape_crop.core.sampling import sample_perimeter_strip
 from shape_crop.core.content_mapping import ContentMapping
 from shape_crop.core.renderer import RenderCancelled, blend
@@ -13,7 +13,7 @@ def render_source(design, material, inner_material=None, max_side=None, progress
     if width * height > 180_000_000:
         raise ValueError('当前导出超过 1.8 亿像素，请降低 DPI 或尺寸')
     layout = material.source_layout
-    shape = CircularBand(design.diameter_cm, design.height_cm)
+    shape = create_shape(design)
     # Width fixes the original artwork scale; height only selects a centred crop.
     scale = design.diameter_cm / layout.width_px
     border_cm = layout.border_depth_px * scale

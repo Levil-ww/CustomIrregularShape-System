@@ -25,7 +25,8 @@ def test_gui_snapshot_presets_and_background_worker():
     timeout.timeout.connect(loop.quit)
     timeout.start(20000)
     loop.exec_()
-    assert not worker.isRunning()
+    # finished handlers schedule deleteLater; the wrapper may already be deleted.
+    assert window.worker is None
     assert not errors
     assert window.preview.original is not None
     assert window.worker is None
@@ -56,9 +57,50 @@ def test_automatic_gui_filename_and_worker(tmp_path):
     timer.timeout.connect(loop.quit)
     timer.start(20000)
     loop.exec_()
-    assert not worker.isRunning()
+    assert window.worker is None
     assert not errors
     assert window.preview.original is not None
     assert '140 × 80cm' in window.match_label.text()
+    window.close()
+    app.processEvents()
+
+
+def test_arc_gui_sketch_review_and_new_order():
+    import pytest
+    from shape_crop.gui.main_window import MainWindow
+    from shape_crop.services.sketch_recognition import SketchDimensions
+    from shape_crop.services.workflow import resolve_request
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    window.target.setText('花幔;86x138cm')
+    window.override.setText('unused.jpg')
+    window.sketch_path = 'sketch.png'
+    window.sketch_result(SketchDimensions(138,86,108,'核对尺寸'))
+    assert window.shape_mode.currentData() == 'arc'
+    with pytest.raises(ValueError, match='核对'):
+        window.snapshot()
+    window.sketch_review.setChecked(True)
+    design, _ = resolve_request(window.snapshot())
+    assert (design.diameter_cm,design.height_cm,design.straight_cm) == (139,87,108)
+    window.width_value.setValue(140)
+    assert not window.sketch_review.isChecked()
+    assert '与文件名不同' in window.dimension_label.text()
+    window.target.setText('花幔;80x130cm')
+    assert window.sketch_path == ''
+    assert window.straight_value.value() == 0
+    assert (window.width_value.value(),window.height_value.value()) == (130,80)
+    window.close()
+    app.processEvents()
+
+
+def test_manual_arc_snapshot():
+    app = QApplication.instance() or QApplication([])
+    window = ManualWindow()
+    window.fields['diameter'].setValue(139)
+    window.fields['height'].setValue(87)
+    window.fields['straight'].setValue(108)
+    window.shape_mode.setCurrentIndex(1)
+    assert window.snapshot().shape_mode == 'arc'
+    assert window.snapshot().straight_cm == 108
     window.close()
     app.processEvents()

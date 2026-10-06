@@ -12,7 +12,7 @@ GUI / CLI
   → services.design_service.generate
       → services.materials.prepare
       → core.source_renderer.render_source（自动） / core.renderer.render（手工）
-          → core.geometry.CircularBand
+          → core.geometry.create_shape → CircularBand / ArcBand
           → core.sampling
       → services.export.save_image
 ```
@@ -52,6 +52,9 @@ GUI / CLI
 - 边框周向坐标使用 `-abs(y)` 保持上下对称，花纹采样保留有符号的 y。边宽取原四边安全内容区所需的最大内缩距离，兼顾尺寸补偿；各层按同一径向比例映射，不改变花纹坐标。
 - SourceLayout 的 strip 排除矩形转角后提取整周期。周长使用整数次周期闭合，避免尺寸变化时在轮廓起点产生相位断裂；无法可靠提取周期时报告不确定性并用完整安全条带。
 - 目标补偿仅在 workflow 加一次：long+1cm、short+1cm。输出保留目标名称，不改大小写、不追加实际尺寸。
+- 弧形台直边为独立参数，不参与尺寸补偿。原始及补偿后的参数均校验；最大宽度、总高可从草图校正，图库匹配使用校正后的原始尺寸。
+- ArcBand 采用对称短圆弧：鼓出 s=(W-L)/2，半径 R=((H/2)²+s²)/(2s)，右圆心 c=W/2-R、左圆心-c。要求 0<L<W、W-L≤H；等距内缩保持圆心，减小半径和半高，再重算直边交点。边界距离投影到有限圆弧，不能使用支撑圆未参与轮廓的部分。
+- services/sketch_recognition.py 与 windows_ocr.ps1 封装本地系统 OCR 及尺寸位置关联；workers/sketch_worker.py 后台运行，不依赖 GUI。OCR 结果始终需要核对，缺失数据留给手工输入；更换订单清除草图来源。gui/shape_preview.py 展示厘米参数重建的轮廓。
 - 参数是 frozen dataclass，后台任务拿快照；运行期间禁用参数编辑，关闭窗口先请求取消，等线程结束后关闭。
 - 取消在分块之间响应；图片加载和文件编码阶段需要等待当前操作结束。未完成编码不会替换已有目标文件。
 - JSON `schema_version=1`。未来新增字段应有默认值；格式迁移单独实现，避免静默丢弃旧字段。

@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFo
     QGroupBox, QDoubleSpinBox, QSpinBox, QPushButton, QLabel, QLineEdit, QComboBox,
     QFileDialog, QMessageBox, QScrollArea, QProgressBar, QColorDialog)
 from shape_crop.models.design import DesignSpec, MaterialSpec
-from shape_crop.core.geometry import CircularBand
+from shape_crop.core.geometry import create_shape
 from shape_crop.services.materials import load_image
 from shape_crop.services.project_io import save_project, load_project
 from shape_crop.workers.render_worker import RenderWorker
@@ -75,8 +75,14 @@ class ManualWindow(QMainWindow):
 
         group, form = self.group('外轮廓（厘米）')
         left.addWidget(group)
-        self.add_number(form, 'diameter', '外圆直径', 200, 0.01, 1000)
+        self.shape_mode = QComboBox()
+        self.shape_mode.addItem('圆桌', 'circular')
+        self.shape_mode.addItem('弧形台（对称圆弧）', 'arc')
+        form.addRow('轮廓模块', self.shape_mode)
+        self.add_number(form, 'diameter', '最大宽度 / 圆直径', 200, 0.01, 1000)
         self.add_number(form, 'height', '保留总高度', 83.76, 0.01, 1000)
+        self.add_number(form, 'straight', '弧形台直边长度', 108, 0, 1000)
+        self.fields['straight'].setEnabled(False)
         circle = QPushButton('完整圆：高度等于直径')
         circle.clicked.connect(lambda: self.fields['height'].setValue(self.fields['diameter'].value()))
         form.addRow(circle)
@@ -160,6 +166,11 @@ class ManualWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.cancel)
         for field in self.fields.values():
             field.valueChanged.connect(self.update_dimensions)
+        self.shape_mode.currentIndexChanged.connect(self.change_shape_mode)
+        self.update_dimensions()
+
+    def change_shape_mode(self):
+        self.fields['straight'].setEnabled(self.shape_mode.currentData() == 'arc')
         self.update_dimensions()
 
     @staticmethod
@@ -223,6 +234,7 @@ class ManualWindow(QMainWindow):
         inner = replace(self.base.inner_material or MaterialSpec(), layout='manual', path=inner_path,
                         fit=material.fit, tile_width_cm=v['tile'], border_repeat_cm=v['repeat']) if inner_path else None
         spec = replace(self.base, diameter_cm=v['diameter'], height_cm=v['height'], dpi=v['dpi'],
+                       shape_mode=self.shape_mode.currentData(), straight_cm=v['straight'],
                        border=replace(self.base.border, margin_cm=v['margin'], width_cm=v['border_width'], line_cm=v['line']),
                        material=material, inner_diameter_cm=v['inner'], inner_border_cm=v['inner_border'], inner_material=inner)
         spec.validate()
@@ -231,7 +243,7 @@ class ManualWindow(QMainWindow):
     def update_dimensions(self):
         try:
             spec = self.snapshot()
-            shape = CircularBand(spec.diameter_cm, spec.height_cm)
+            shape = create_shape(spec)
             w, h = spec.pixel_size()
             self.dimensions.setText(f'上下各 {spec.height_cm / 2:.3f} cm\n上下直边 {shape.chord:.4f} cm\n导出 {w} × {h} px')
             self.dimensions.setStyleSheet('')
@@ -325,6 +337,7 @@ class ManualWindow(QMainWindow):
             spec = load_project(path)
             self.base = spec
             values = dict(diameter=spec.diameter_cm, height=spec.height_cm, dpi=spec.dpi,
+                          straight=spec.straight_cm,
                           margin=spec.border.margin_cm, border_width=spec.border.width_cm,
                           line=spec.border.line_cm, tile=spec.material.tile_width_cm,
                           repeat=spec.material.border_repeat_cm, inner=spec.inner_diameter_cm,
@@ -337,6 +350,8 @@ class ManualWindow(QMainWindow):
             self.outer_path.setText(spec.material.path)
             self.inner_path.setText(spec.inner_material.path if spec.inner_material else '')
             self.fit.setCurrentIndex(0 if spec.material.fit == 'cover' else 1)
+            self.shape_mode.setCurrentIndex(1 if spec.shape_mode == 'arc' else 0)
+            self.fields['straight'].setEnabled(spec.shape_mode == 'arc')
             self.update_dimensions()
             self.status.setText('设计已载入，点击“生成预览”查看')
         except Exception as error:

@@ -2,7 +2,7 @@
 import math
 import numpy as np
 from PIL import Image
-from shape_crop.core.geometry import CircularBand
+from shape_crop.core.geometry import create_shape
 from shape_crop.core.sampling import content_sample, strip_sample
 
 
@@ -23,7 +23,7 @@ def render(design, outer_material=None, inner_material=None, max_side=None,
     width, height = design.pixel_size(max_side)
     if width * height > 180_000_000:
         raise ValueError('当前导出超过 1.8 亿像素，请降低 DPI 或尺寸')
-    shape = CircularBand(design.diameter_cm, design.height_cm)
+    shape = create_shape(design)
     border = design.border
     px_cm = max(design.diameter_cm / width, design.height_cm / height)
     x = ((np.arange(width, dtype=np.float32) + .5) / width - .5) * design.diameter_cm
