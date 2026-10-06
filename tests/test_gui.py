@@ -61,6 +61,25 @@ def test_automatic_gui_filename_and_worker(tmp_path):
     assert not errors
     assert window.preview.original is not None
     assert '140 × 80cm' in window.match_label.text()
+    # Export the same order after preview through the actual background workflow.
+    timer.stop()
+    window.dpi.setValue(10)
+    window.output_dir.setText(str(tmp_path))
+    window.start_task(False)
+    worker = window.worker
+    assert worker is not None
+    worker.finished.connect(loop.quit)
+    timer.start(20000)
+    loop.exec_()
+    timer.stop()
+    assert window.worker is None
+    assert not errors
+    exported = tmp_path / (window.target.text() + '.jpg')
+    with Image.open(exported) as result:
+        assert result.mode == 'RGB'
+        assert result.size == (555, 319)
+    assert window.progress.value() == 100
+    assert '成品已保存' in window.status.text()
     window.close()
     app.processEvents()
 

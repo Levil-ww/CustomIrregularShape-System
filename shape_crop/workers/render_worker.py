@@ -6,6 +6,7 @@ from shape_crop.core.renderer import RenderCancelled
 
 class RenderWorker(QThread):
     progress = pyqtSignal(int)
+    status = pyqtSignal(str)
     result = pyqtSignal(object)
     error = pyqtSignal(str)
     cancelled = pyqtSignal()
@@ -17,7 +18,7 @@ class RenderWorker(QThread):
     def run(self):
         try:
             image = generate(self.design, self.preview, self.output,
-                             self.progress.emit, self.isInterruptionRequested)
+                             self.progress.emit, self.isInterruptionRequested, status=self.status.emit)
             self.result.emit(image if self.preview else None)
         except RenderCancelled:
             self.cancelled.emit()
@@ -43,7 +44,8 @@ class WorkflowWorker(QThread):
             design, match_info = resolve_request(self.request, self.isInterruptionRequested, self.status.emit)
             self.status.emit('读取原素材边框层次与花纹…')
             reports = []
-            image = generate(design, self.preview, self.output, self.progress.emit, self.isInterruptionRequested, reports.append)
+            image = generate(design, self.preview, self.output, self.progress.emit,
+                             self.isInterruptionRequested, reports.append, self.status.emit)
             self.result.emit(dict(image=image if self.preview else None, design=design,
                                   match_info=match_info + '\n' + '\n'.join(reports), output=self.output))
         except RenderCancelled:

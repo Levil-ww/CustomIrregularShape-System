@@ -11,7 +11,9 @@ def sample(image, x, y, wrap_x=False, wrap_y=False):
     x0, y0 = np.floor(x).astype(np.int32), np.floor(y).astype(np.int32)
     x1 = (x0 + 1) % width if wrap_x else np.minimum(x0 + 1, width - 1)
     y1 = (y0 + 1) % height if wrap_y else np.minimum(y0 + 1, height - 1)
-    fx, fy = (x - x0)[..., None], (y - y0)[..., None]
+    # Subtracting int32 indices promotes float32 coordinates to float64 in NumPy.
+    # Keep interpolation at float32 to halve temporary bandwidth and memory.
+    fx, fy = (x - x0.astype(np.float32))[..., None], (y - y0.astype(np.float32))[..., None]
     a = image[y0, x0].astype(np.float32) * (1 - fx) + image[y0, x1] * fx
     b = image[y1, x0].astype(np.float32) * (1 - fx) + image[y1, x1] * fx
     return np.clip(a * (1 - fy) + b * fy, 0, 255).astype(np.uint8)

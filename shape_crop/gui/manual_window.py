@@ -13,6 +13,7 @@ from shape_crop.services.project_io import save_project, load_project
 from shape_crop.workers.render_worker import RenderWorker
 from shape_crop.gui.crop_dialog import CropDialog
 from shape_crop.gui.image_utils import to_pixmap
+from shape_crop.gui.theme import apply_theme
 
 
 class PreviewCanvas(QLabel):
@@ -21,6 +22,13 @@ class PreviewCanvas(QLabel):
         self.original = None
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(400, 350)
+        self._scaled_key = None
+        self._checker = QPixmap(32, 32)
+        self._checker.fill(QColor('#f5f7fa'))
+        painter = QPainter(self._checker)
+        painter.fillRect(0, 0, 16, 16, QColor('#eaf0f6'))
+        painter.fillRect(16, 16, 16, 16, QColor('#eaf0f6'))
+        painter.end()
 
     def show_image(self, image):
         self.original = to_pixmap(image)
@@ -28,7 +36,10 @@ class PreviewCanvas(QLabel):
 
     def refresh(self):
         if self.original is not None:
-            self.setPixmap(self.original.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            key = (self.original.cacheKey(), self.width(), self.height())
+            if key != self._scaled_key:
+                self._scaled_key = key
+                self.setPixmap(self.original.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -36,10 +47,9 @@ class PreviewCanvas(QLabel):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        tile = 16
-        for y in range(0, self.height(), tile):
-            for x in range(0, self.width(), tile):
-                painter.fillRect(x, y, tile, tile, QColor('#eeeeee' if (x // tile + y // tile) % 2 else '#ffffff'))
+        painter.drawTiledPixmap(self.rect(), self._checker)
+        if self.original is None:
+            painter.fillRect(self.rect(), QColor('#f8faff'))
         painter.end()
         super().paintEvent(event)
 
@@ -49,6 +59,7 @@ class ManualWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle('手工排版 · 圆桌素材设计器')
         self.resize(1280, 860)
+        apply_theme(self)
         self.base = DesignSpec()
         self.worker = None
         self.close_pending = False
@@ -285,6 +296,7 @@ class ManualWindow(QMainWindow):
         worker = RenderWorker(design, preview, output, self)
         self.worker = worker
         worker.progress.connect(self.progress.setValue)
+        worker.status.connect(self.status.setText)
         worker.result.connect(lambda image: self.task_result(image, output))
         worker.error.connect(self.show_error)
         worker.cancelled.connect(lambda: self.status.setText('任务已取消'))

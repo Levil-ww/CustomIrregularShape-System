@@ -14,7 +14,8 @@ def save_image(image, path, dpi):
     os.close(handle)
     try:
         if suffix == '.png':
-            image.save(temporary, format='PNG', dpi=(dpi, dpi))
+            # PNG remains lossless; lower compression spends less time encoding.
+            image.save(temporary, format='PNG', compress_level=1, dpi=(dpi, dpi))
         else:
             flat = Image.new('RGB', image.size, 'white')
             flat.paste(image, mask=image.getchannel('A'))
