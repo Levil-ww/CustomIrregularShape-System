@@ -61,7 +61,8 @@ def analyze_layout(image):
     # Extract only the safe horizontal span. Side borders need not equal the top depth.
     safe_left, safe_right = min(left + 1, right - 1), max(left + 1, right - 1)
     strip, period = extract_period(pixels[:max(1, depth), safe_left:safe_right])
-    content = pixels[top:bottom, left:right].copy()
+    # Sampling is read-only; a view avoids retaining a second near-full image.
+    content = pixels[top:bottom, left:right]
     message = f'自动读取完整边框带：{depth / height * 100:.2f}% 短边，原色原层次' if depth else '未检测到稳定边框分隔线，保留原图填充；可用高级选区'
     if period:
         message += f'；装饰周期 {period}px'

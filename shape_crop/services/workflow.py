@@ -7,7 +7,7 @@ from shape_crop.services.catalog import match_material
 from shape_crop.services.filename_parser import parse_filename
 
 
-def resolve_request(request, cancelled=None, status=None):
+def resolve_request(request, cancelled=None, status=None, catalog_session=None):
     target = parse_filename(request.target_name)
     if not math.isfinite(request.allowance_cm) or request.allowance_cm < 0:
         raise ValueError('尺寸补偿不能为负数')
@@ -29,7 +29,8 @@ def resolve_request(request, cancelled=None, status=None):
         path = request.material_override
         detail = '使用指定素材'
     else:
-        match = match_material(target, request.library_dir, cancelled, status)
+        match = (catalog_session.match(target, cancelled, status) if catalog_session else
+                 match_material(target, request.library_dir, cancelled, status))
         path = match.path
         detail = f'匹配 {match.source.width_cm:g} × {match.source.height_cm:g}cm；比例差 {math.expm1(match.ratio_error) * 100:.2f}%'
     design = replace(design, material=MaterialSpec(path=path))

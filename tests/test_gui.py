@@ -2,7 +2,16 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QEventLoop, QTimer
+import pytest
+from PyQt5.QtCore import QSettings
 from shape_crop.gui.manual_window import ManualWindow
+
+
+@pytest.fixture(autouse=True)
+def isolated_desktop_settings(tmp_path, monkeypatch):
+    from shape_crop.gui import main_window
+    settings = QSettings(str(tmp_path / 'settings.ini'), QSettings.IniFormat)
+    monkeypatch.setattr(main_window, 'QSettings', lambda *args: settings)
 
 
 def test_gui_snapshot_presets_and_background_worker():
@@ -123,3 +132,45 @@ def test_manual_arc_snapshot():
     assert window.snapshot().straight_cm == 108
     window.close()
     app.processEvents()
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows recursive catalog watcher')
+def test_desktop_export_then_different_order_does_not_rescan(tmp_path):
+    from unittest.mock import patch
+    from PIL import Image
+    from shape_crop.gui.main_window import MainWindow
+    from shape_crop.services import catalog
+    app = QApplication.instance() or QApplication([])
+    for pattern in ('花甲', '花乙'):
+        Image.new('RGB', (140, 80), (240, 220, 190)).save(tmp_path / (pattern + ';80x140cm.jpg'))
+    window = MainWindow()
+    window.target.setText('花甲;80x140cm裁剪有图')
+    window.library.setText(str(tmp_path))
+    window.output_dir.setText(str(tmp_path))
+    window.dpi.setValue(10)
+    errors = []
+    window.show_error = errors.append
+    loop = QEventLoop()
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.timeout.connect(loop.quit)
+    def run(preview):
+        window.start_task(preview)
+        window.worker.finished.connect(loop.quit)
+        timer.start(10000)
+        loop.exec_()
+        timer.stop()
+        assert window.worker is None
+        assert not errors
+    try:
+        run(False)
+        assert window.catalog_session.active
+        window.target.setText('花乙;80x140cm裁剪有图')
+        with patch.object(catalog.os, 'scandir', side_effect=AssertionError('换订单重新全库扫描')):
+            run(True)
+        assert window.preview.original is not None
+        assert '花乙' in window.match_label.text()
+        assert '匹配' in window.status.text() and '预览' in window.status.text()
+    finally:
+        window.close()
+        app.processEvents()

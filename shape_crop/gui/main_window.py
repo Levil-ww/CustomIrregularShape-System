@@ -17,6 +17,7 @@ from shape_crop.services.filename_parser import parse_filename
 from shape_crop.services.workflow import output_path
 from shape_crop.workers.render_worker import WorkflowWorker
 from shape_crop.gui.theme import apply_theme
+from shape_crop.services.catalog_session import CatalogSession
 
 
 class MainWindow(QMainWindow):
@@ -27,6 +28,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1000, 720)
         apply_theme(self)
         self.worker = None
+        self.catalog_session = None
         self.sketch_worker = None
         self.sketch_path = ''
         self.close_pending = False
@@ -161,6 +163,11 @@ class MainWindow(QMainWindow):
         files_title.setObjectName('sectionTitle')
         controls.addWidget(files_title)
         self.library = self.directory_row(controls, '矩形 JPG 素材图库', 'library_dir')
+        self.library.textChanged.connect(self.library_changed)
+        refresh_library = QPushButton('刷新图库索引')
+        refresh_library.setToolTip('图库断开重连或怀疑索引未同步时，重新核对目录；正常换单无需刷新')
+        refresh_library.clicked.connect(self.refresh_library)
+        controls.addWidget(refresh_library)
         self.output_dir = self.directory_row(controls, '输出目录', 'output_dir')
         format_row = QFormLayout()
         self.format = QComboBox()
@@ -243,6 +250,16 @@ class MainWindow(QMainWindow):
         row.addWidget(button)
         layout.addLayout(row)
         return line
+
+    def library_changed(self):
+        if self.catalog_session:
+            self.catalog_session.close()
+            self.catalog_session = None
+
+    def refresh_library(self):
+        if self.catalog_session:
+            self.catalog_session.request_refresh()
+        self.status.setText('已标记刷新图库，下次匹配将核对目录并更新索引')
 
     def snapshot(self):
         request = ProductRequest(self.target.text().strip(), self.library.text().strip(),
@@ -412,7 +429,10 @@ class MainWindow(QMainWindow):
             self.export_button.setEnabled(False)
             self.cancel.setEnabled(True)
             self.progress.setValue(0)
-            self.worker = WorkflowWorker(request, preview, output, self)
+            if not request.material_override and self.catalog_session is None:
+                self.catalog_session = CatalogSession(request.library_dir)
+            self.worker = WorkflowWorker(request, preview, output, self,
+                                         catalog_session=self.catalog_session)
             self.worker.status.connect(self.status.setText)
             self.worker.progress.connect(self.progress.setValue)
             self.worker.result.connect(self.task_result)
@@ -429,7 +449,9 @@ class MainWindow(QMainWindow):
         if result['image'] is not None:
             self.preview.show_image(result['image'])
             self.preview_hint.setText('透明棋盘背景 · 预览最长边 1200px')
-            self.status.setText('自动预览已生成，采用原素材完整边框带')
+            timings = result.get('timings', {})
+            self.status.setText('自动预览已生成 · 匹配 {:.2f}s · 预览 {:.2f}s'.format(
+                timings.get('match', 0), timings.get('generate', 0)))
         else:
             self.status.setText('成品已保存：' + result['output'])
 
@@ -461,6 +483,8 @@ class MainWindow(QMainWindow):
             self.cancel_task()
             event.ignore()
         else:
+            if self.catalog_session:
+                self.catalog_session.close()
             if self.manual_window:
                 self.manual_window.close()
             event.accept()

@@ -17,9 +17,22 @@ class PreparedMaterial:
     source_layout: object = None
 
 
-def load_image(path):
+PREVIEW_SOURCE_SIDE = 2400
+
+
+def load_image(path, max_side=None):
     with Image.open(Path(path)) as source:
-        return ImageOps.exif_transpose(source).convert('RGB')
+        if max_side:
+            # JPEG draft reduces pixels in the decoder, before allocating a
+            # full print-resolution image. Other formats use bounded resizing.
+            scale = min(1, max_side / max(source.size))
+            source.draft('RGB', tuple(max(1, round(value * scale)) for value in source.size))
+        ImageOps.exif_transpose(source, in_place=True)
+        if max_side:
+            source.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+        # The context closes the file, not the loaded pixel buffer. Avoid the
+        # old EXIF copy + unconditional RGB copy for an already RGB image.
+        return source if source.mode == 'RGB' else source.convert('RGB')
 
 
 def extract(image, box):
@@ -46,8 +59,15 @@ def prepare(material, preview=False):
         return None
     path = Path(material.path).resolve()
     info = path.stat()
-    key = (material, str(path), info.st_mtime_ns, info.st_ctime_ns, info.st_size,
-           info.st_ino, preview if material.layout == 'manual' else False)
+    identity = (material, str(path), info.st_mtime_ns, info.st_ctime_ns, info.st_size, info.st_ino)
+    # Reuse a full material for a small source. A large cached print source must
+    # not force later previews back onto the expensive full-resolution analysis.
+    with _cache_lock:
+        full = _prepared.get(identity + (False,))
+        if full and preview and material.layout == 'source' and max(
+                full[0].source_layout.width_px, full[0].source_layout.height_px) <= PREVIEW_SOURCE_SIDE:
+            return full[0]
+    key = identity + (preview,)
     with _cache_lock:
         if key in _prepared:
             _prepared.move_to_end(key)
@@ -58,9 +78,15 @@ def prepare(material, preview=False):
         arrays.extend((result.source_layout.image, result.source_layout.content))
     arrays = {id(array): array for array in arrays}.values()
     size = 0
+    owners = set()
     for array in arrays:
         array.setflags(write=False)
-        size += array.nbytes
+        root = array
+        while isinstance(root.base, np.ndarray):
+            root = root.base
+        if id(root) not in owners:
+            size += root.nbytes
+            owners.add(id(root))
     global _cache_bytes
     if size <= _MAX_CACHE_BYTES:
         with _cache_lock:
@@ -71,12 +97,18 @@ def prepare(material, preview=False):
                 _, (_, removed) = _prepared.popitem(last=False)
                 _cache_bytes -= removed
             _prepared[key] = result, size
+            # Small automatic sources are identical in both paths.
+            if preview and material.layout == 'source' and max(result.source_layout.width_px,
+                    result.source_layout.height_px) < PREVIEW_SOURCE_SIDE:
+                # Share the key instead of storing/accounting the entry twice.
+                del _prepared[key]
+                _prepared[identity + (False,)] = result, size
             _cache_bytes += size
     return result
 
 
 def _prepare(material, preview):
-    image = load_image(material.path)
+    image = load_image(material.path, PREVIEW_SOURCE_SIDE if preview else None)
     if material.layout == 'source':
         layout = analyze_layout(image)
         return PreparedMaterial(layout.image, layout.strip, material, layout)
