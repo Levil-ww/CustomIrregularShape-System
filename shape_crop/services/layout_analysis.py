@@ -27,13 +27,22 @@ def boundary_depth(pixels):
     rows = pixels[:limit, columns].astype(np.float32)
     median = np.median(rows, axis=1)
     uniform = np.mean(np.max(np.abs(rows - median[:, None, :]), axis=2) <= 10, axis=1) >= .93
-    # Last uniform separator before sustained floral texture. The full band includes background,
-    # ornament and all final separator lines; no generic line colour/thickness is substituted.
+    # Stop at the first sustained content transition. A later blank row inside an illustration
+    # is artwork, not another separator; scanning past content silently discards the picture.
     run = max(5, round(height * .009))
     depth = None
     for row in range(1, limit - run):
         if uniform[row - 1] and not uniform[row] and not np.any(uniform[row:row + run]):
+            # A short, genuinely periodic ornament followed by another separator is still
+            # a border layer. A later white gap after non-periodic floral content is not.
+            following = np.flatnonzero(uniform[row:row + max(run + 1, round(height * .10))])
+            if following.size:
+                end = row + int(following[0])
+                _, period = extract_period(pixels[row:end, columns[0]:columns[-1] + 1])
+                if period:
+                    continue
             depth = row
+            break
     return depth or 0
 
 

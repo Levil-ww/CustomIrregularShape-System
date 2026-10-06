@@ -19,13 +19,15 @@ def main():
     parser.add_argument('--output-dir', default='outputs')
     parser.add_argument('--full-export', action='store_true', help='额外导出 150 DPI 截圆成品')
     parser.add_argument('--target', help='验证目标文件名匹配、+1cm 尺寸补偿和同名输出')
+    parser.add_argument('--use-exact-material', action='store_true', help='验证指定参考素材，跳过自动匹配')
     args = parser.parse_args()
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     if args.target:
         from shape_crop.models.request import ProductRequest
         from shape_crop.services.workflow import resolve_request, output_path
-        request = ProductRequest(args.target, str(Path(args.material).parent))
+        request = ProductRequest(args.target, str(Path(args.material).parent),
+                                 args.material if args.use_exact_material else '')
         design, detail = resolve_request(request)
         print(detail)
         path = output_path(request, output, '.png')

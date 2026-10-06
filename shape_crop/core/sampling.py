@@ -17,15 +17,6 @@ def sample(image, x, y, wrap_x=False, wrap_y=False):
     return np.clip(a * (1 - fy) + b * fy, 0, 255).astype(np.uint8)
 
 
-def sample_mirrored(image, x, y):
-    """Extend only clean content, without clamping border-colour columns or enlarging motifs."""
-    height, width = image.shape[:2]
-    def reflect(coordinate, size):
-        phase = (np.asarray(coordinate) + .5) % (2 * size)
-        return np.where(phase <= size, phase - .5, 2 * size - phase - .5)
-    return sample(image, reflect(x, width), reflect(y, height))
-
-
 def sample_perimeter_strip(image, arc_length, depth_px, perimeter_cm, source_scale_cm, origin=0.):
     """Close the perimeter with an integer count of complete source periods.
 
