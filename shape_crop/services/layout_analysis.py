@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 import numpy as np
 from PIL import Image
+from shape_crop.services.texture_period import extract_period
 
 
 @dataclass(frozen=True)
@@ -12,15 +13,16 @@ class SourceLayout:
     width_px: int
     height_px: int
     report: str
+    content: np.ndarray
+    content_box_px: tuple[int, int, int, int]
+    strip_period_px: int = 0
 
 
-def analyze_layout(image):
-    if image.height > image.width:
-        image = image.transpose(Image.Transpose.ROTATE_90)
-    pixels = np.asarray(image)
+def boundary_depth(pixels):
+    """Scan one edge toward the middle, independent of the other three edge widths."""
     height, width = pixels.shape[:2]
     # Evaluate horizontal uniformity inside the middle half, away from rectangular corners.
-    limit = max(2, int(height * .22))
+    limit = max(2, int(height * .40))
     columns = np.linspace(width * .25, width * .75 - 1, min(384, max(2, width // 2))).astype(int)
     rows = pixels[:limit, columns].astype(np.float32)
     median = np.median(rows, axis=1)
@@ -32,10 +34,27 @@ def analyze_layout(image):
     for row in range(1, limit - run):
         if uniform[row - 1] and not uniform[row] and not np.any(uniform[row:row + run]):
             depth = row
-    if depth is None:
-        # Some materials have no flat separators. Preserve the image directly, do not fabricate lines.
-        depth = 0
-    left, right = min(depth + 1, width // 3), max(width - depth - 1, width * 2 // 3)
-    strip = pixels[:max(1, depth), left:right].copy()
+    return depth or 0
+
+
+def analyze_layout(image):
+    if image.height > image.width:
+        image = image.transpose(Image.Transpose.ROTATE_90)
+    pixels = np.asarray(image)
+    height, width = pixels.shape[:2]
+    depth = boundary_depth(pixels)
+    bottom = height - boundary_depth(pixels[::-1])
+    left = boundary_depth(pixels.transpose(1, 0, 2))
+    right = width - boundary_depth(pixels[:, ::-1].transpose(1, 0, 2))
+    top = depth
+    if right <= left or bottom <= top:
+        raise ValueError('原素材内容区识别失败，四边边框已占满图片')
+    # Extract only the safe horizontal span. Side borders need not equal the top depth.
+    safe_left, safe_right = min(left + 1, right - 1), max(left + 1, right - 1)
+    strip, period = extract_period(pixels[:max(1, depth), safe_left:safe_right])
+    content = pixels[top:bottom, left:right].copy()
     message = f'自动读取完整边框带：{depth / height * 100:.2f}% 短边，原色原层次' if depth else '未检测到稳定边框分隔线，保留原图填充；可用高级选区'
-    return SourceLayout(pixels, strip, depth, width, height, message)
+    if period:
+        message += f'；装饰周期 {period}px'
+    return SourceLayout(pixels, strip, depth, width, height, message, content,
+                        (left, top, right, bottom), period)

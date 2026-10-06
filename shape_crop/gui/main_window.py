@@ -1,5 +1,6 @@
 """Filename-driven automatic workflow; optional settings are collapsed."""
 from pathlib import Path
+from shape_crop import __version__
 from PyQt5.QtCore import QSettings
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QLabel, QFileDialog, QComboBox, QSpinBox, QDoubleSpinBox,
@@ -14,7 +15,7 @@ from shape_crop.workers.render_worker import WorkflowWorker
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('圆桌素材设计器 · 自动排版 0.2.0')
+        self.setWindowTitle(f'圆桌素材设计器 · 自动排版 {__version__}')
         self.resize(1280, 850)
         self.worker = None
         self.close_pending = False
