@@ -93,14 +93,19 @@ def analyze_layout(image):
         estimate = round(found * ratio)
         if ratio == 1:
             return estimate
-        # Locate the colour separator at native resolution near the estimate.
+        # Refine the flat-frame to artwork transition, not the strongest colour
+        # jump: that jump can be the START of a thin black separator and would
+        # exclude the entire line from the extracted frame.
         radius = max(2, int(np.ceil(2 * ratio)))
         lo, hi = max(1, estimate - radius), min(full.shape[0] - 1, estimate + radius)
         columns = np.linspace(full.shape[1] * .25, full.shape[1] * .75 - 1, 384).astype(int)
-        colours = np.median(full[lo - 1:hi + 1, columns].astype(np.float32), axis=1)
-        changes = np.max(np.abs(np.diff(colours, axis=0)), axis=1)
-        strongest = int(np.argmax(changes))
-        return lo + strongest if changes[strongest] > 20 else estimate
+        rows = full[lo - 1:hi + 4, columns].astype(np.float32)
+        colours = np.median(rows, axis=1)
+        uniform = np.mean(np.max(np.abs(rows - colours[:, None, :]), axis=2) <= 10,
+                          axis=1) >= .93
+        transitions = [lo - 1 + index for index in range(1, len(uniform) - 2)
+                       if uniform[index - 1] and not np.any(uniform[index:index + 3])]
+        return min(transitions, key=lambda value: abs(value - estimate)) if transitions else estimate
 
     depth = edge(pixels, detected)
     bottom = height - edge(pixels[::-1], detected[::-1])
