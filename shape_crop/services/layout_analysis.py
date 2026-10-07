@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image
 from shape_crop.services.texture_period import extract_period, extract_dark_period
+from shape_crop.services.floating_artwork import detect_floating_artwork
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class SourceLayout:
     strip_period_px: int = 0
     strip_is_sentence: bool = False
     sentence_layers: tuple = ()
+    floating_artwork: object = None
 
 
 def _touching_ornament_end(pixels, row, left, right, run):
@@ -181,6 +183,28 @@ def analyze_layout(image):
     left = edge(pixels.transpose(1, 0, 2), detected.transpose(1, 0, 2))
     right = width - edge(pixels[:, ::-1].transpose(1, 0, 2), detected[:, ::-1].transpose(1, 0, 2))
     top = depth
+    floating = detect_floating_artwork(probe)
+    if floating is not None and depth:
+        # A genuine repeating frame ornament is not a gallery's blank moat.
+        # Do not reclassify patterned borders around ordinary cover artwork.
+        probe_depth = max(1, round(depth * probe.height / height))
+        probe_left = max(0, round(left * probe.width / width))
+        probe_right = max(probe_left + 1, round(right * probe.width / width))
+        _, frame_period = extract_period(detected[:probe_depth, probe_left:probe_right])
+        if frame_period and frame_period >= 4:
+            floating = None
+    if floating is not None:
+        bounds, frame, background = floating
+        ratios = (width / probe.width, height / probe.height) * 2
+        bounds = tuple(float(value * ratio) for value, ratio in zip(bounds, ratios))
+        frame = tuple(float(value * ratio) for value, ratio in zip(frame, ratios))
+        floating = bounds, frame, background
+        # Gallery whitespace is content. Extract just the actual rectangular
+        # frame, including a small recognition margin for antialiased outlines.
+        padding = max(1, round(3 * max(width, height) / min(800, max(width, height))))
+        left, top = round(frame[0]) + padding, round(frame[1]) + padding
+        right, bottom = round(frame[2]) - padding, round(frame[3]) - padding
+        depth = top
     if right <= left or bottom <= top:
         raise ValueError('原素材内容区识别失败，四边边框已占满图片')
     # Extract only the safe horizontal span. Side borders need not equal the top depth.
@@ -210,5 +234,7 @@ def analyze_layout(image):
     message = f'自动读取完整边框带：{depth / height * 100:.2f}% 短边，原色原层次' if depth else '未检测到稳定边框分隔线，保留原图填充；可用高级选区'
     if period:
         message += f'；装饰周期 {period}px'
+    if floating is not None:
+        message += '；独立图案留白类：完整图案组等比适配，保留原素材最小留白距离'
     return SourceLayout(pixels, strip, depth, width, height, message, content,
-                        (left, top, right, bottom), period, sentence, layers)
+                        (left, top, right, bottom), period, sentence, layers, floating)

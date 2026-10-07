@@ -1,4 +1,4 @@
-"""Source-faithful layout renderer: one scale for both original borders and floral content."""
+"""Preserve source frames and uniformly fit artwork according to its visual layout."""
 import numpy as np
 from PIL import Image
 from shape_crop.core.geometry import create_shape, inset_boundary_fraction
@@ -28,7 +28,7 @@ def render_source(design, material, inner_material=None, max_side=None, progress
         raise ValueError('原素材边框过宽，无法用于当前尺寸')
     if design.inner_diameter_cm and design.inner_diameter_cm / 2 >= shape.half_height - border_cm:
         raise ValueError('内圆超出自动识别的外边框内侧')
-    mapping = ContentMapping.create(layout, design.diameter_cm, design.height_cm, border_cm)
+    mapping = ContentMapping.create(layout, design.diameter_cm, design.height_cm, border_cm, shape=shape)
     px_cm = max(design.diameter_cm / width, design.height_cm / height)
     extra_cm = border_cm - native_border_cm
     plain_band = uniform_strip_band(layout.strip) if extra_cm > 1e-9 else None

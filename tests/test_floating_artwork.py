@@ -1,0 +1,68 @@
+"""Gallery compositions share automatic recognition and preserved frame clearance."""
+import numpy as np
+import pytest
+from PIL import Image
+from shape_crop.services.layout_analysis import analyze_layout
+from shape_crop.core.content_mapping import ContentMapping
+from shape_crop.core.geometry import create_shape
+from shape_crop.models.design import DesignSpec, BorderSpec
+
+
+@pytest.mark.parametrize('outlined', [False, True])
+@pytest.mark.parametrize('factor', [1, 4])
+def test_floating_gallery_fits_shape_with_original_minimum_clearance(outlined, factor):
+    image = Image.new('RGB', (650, 400), (247, 240, 232))
+    if outlined:
+        image.paste((170, 130, 70), (16, 16, 634, 384))
+        image.paste((247, 240, 232), (18, 18, 632, 382))
+    for box, colour in [((70, 110, 210, 290), (90, 30, 40)),
+                        ((240, 110, 410, 290), (30, 90, 40)),
+                        ((440, 110, 580, 290), (40, 30, 90))]:
+        image.paste(colour, box)
+    if factor != 1:
+        image = image.resize((650 * factor, 400 * factor), Image.Resampling.NEAREST)
+    layout = analyze_layout(image)
+    assert layout.floating_artwork is not None, '独立画框应自动归为留白图案类'
+    design = DesignSpec(diameter_cm=131, height_cm=81, shape_mode='arc', straight_cm=103,
+                        border=BorderSpec(0, 0, 0))
+    shape = create_shape(design)
+    native = ContentMapping.source_scale(layout, 131, 81)
+    border = max(layout.border_depth_px * native, ContentMapping.required_border(layout, 131, 81))
+    mapping = ContentMapping.create(layout, 131, 81, border, shape=shape)
+    bounds, frame, _ = layout.floating_artwork
+    left, top, right, bottom = bounds
+    gap = min(left - frame[0], top - frame[1], frame[2] - right, frame[3] - bottom) * native
+    xs = np.array([left, left, right, right]) - layout.width_px / 2
+    ys = np.array([top, bottom, top, bottom]) - layout.height_px / 2
+    assert mapping.scale_cm < native, '弧形内框挤占留白时必须整体等比缩小'
+    assert np.min(shape.depth(xs * mapping.scale_cm, ys * mapping.scale_cm)) - border >= gap - .01
+
+
+def test_dense_flower_band_is_not_classified_as_floating_artwork():
+    image = Image.fromarray(np.random.default_rng(5).integers(0, 256, (400, 650, 3), dtype=np.uint8))
+    assert analyze_layout(image).floating_artwork is None
+
+
+def test_render_keeps_entire_gallery_and_reports_shared_scaling(tmp_path):
+    from shape_crop.services.design_service import generate
+    from shape_crop.models.design import MaterialSpec
+    image = Image.new('RGB', (650, 400), (247, 240, 232))
+    colours = [(90, 30, 40), (30, 90, 40), (40, 30, 90)]
+    for box, colour in zip([(70, 110, 210, 290), (240, 110, 410, 290), (440, 110, 580, 290)], colours):
+        image.paste(colour, box)
+    path = tmp_path / 'unnamed-gallery.png'
+    image.save(path)
+    reports = []
+    design = DesignSpec(diameter_cm=131, height_cm=81, dpi=30, shape_mode='arc', straight_cm=103,
+                        border=BorderSpec(0, 0, 0), material=MaterialSpec(str(path)))
+    result = np.asarray(generate(design, diagnostics=reports.append))
+    widths = []
+    for colour in colours:
+        selected = np.max(np.abs(result[..., :3].astype(int) - colour), axis=2) < 3
+        rows, columns = np.nonzero(selected)
+        width, height = columns.max() - columns.min() + 1, rows.max() - rows.min() + 1
+        assert selected.sum() >= width * height * .99, '独立画框不能被圆弧剪掉角部'
+        widths.append(width)
+    assert widths[1] / widths[0] == pytest.approx(170 / 140, abs=.02), '图案组必须共用一个等比缩放'
+    assert widths[2] == pytest.approx(widths[0], abs=1)
+    assert '独立图案留白类' in reports[0] and '最小留白' in reports[0]
