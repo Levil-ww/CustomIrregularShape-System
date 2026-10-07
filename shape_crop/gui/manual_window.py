@@ -14,14 +14,17 @@ from shape_crop.workers.render_worker import RenderWorker
 from shape_crop.gui.crop_dialog import CropDialog
 from shape_crop.gui.image_utils import to_pixmap
 from shape_crop.gui.theme import apply_theme
+from shape_crop.gui.image_viewer import ImagePreviewDialog
 
 
 class PreviewCanvas(QLabel):
     def __init__(self):
         super().__init__('设置尺寸与素材后，点击“生成预览”')
         self.original = None
+        self.viewer = None
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(400, 350)
+        self.setFocusPolicy(Qt.StrongFocus)
         self._scaled_key = None
         self._checker = QPixmap(32, 32)
         self._checker.fill(QColor('#f5f7fa'))
@@ -32,7 +35,37 @@ class PreviewCanvas(QLabel):
 
     def show_image(self, image):
         self.original = to_pixmap(image)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip('点击放大查看，支持滚轮缩放和拖动；按 Enter 也可打开')
+        if self.viewer is not None:
+            self.viewer.set_image(self.original)
         self.refresh()
+
+    def open_viewer(self):
+        if self.original is None or self.original.isNull():
+            return
+        if self.viewer is None:
+            self.viewer = ImagePreviewDialog(self.original, self)
+        self.viewer.show()
+        self.viewer.raise_()
+        self.viewer.activateWindow()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.rect().contains(event.pos()):
+            self.open_viewer()
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.open_viewer()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def hideEvent(self, event):
+        if self.viewer is not None:
+            self.viewer.close()
+        super().hideEvent(event)
 
     def refresh(self):
         if self.original is not None:

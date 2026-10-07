@@ -74,7 +74,7 @@ class MainWindow(QMainWindow):
         preview_title.setObjectName('sectionTitle')
         preview_heading.addWidget(preview_title)
         preview_heading.addStretch()
-        preview_hint = QLabel('透明棋盘背景 · 预览最长边 1200px')
+        preview_hint = QLabel('点击图片放大查看 · 预览最长边 1200px')
         self.preview_hint = preview_hint
         preview_hint.setObjectName('hint')
         preview_heading.addWidget(preview_hint)
@@ -448,7 +448,7 @@ class MainWindow(QMainWindow):
         self.match_label.setToolTip(result['match_info'])
         if result['image'] is not None:
             self.preview.show_image(result['image'])
-            self.preview_hint.setText('透明棋盘背景 · 预览最长边 1200px')
+            self.preview_hint.setText('点击图片放大查看 · 预览最长边 1200px')
             timings = result.get('timings', {})
             self.status.setText('自动预览已生成 · 匹配 {:.2f}s · 预览 {:.2f}s'.format(
                 timings.get('match', 0), timings.get('generate', 0)))
