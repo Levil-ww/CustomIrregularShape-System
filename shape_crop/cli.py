@@ -1,3 +1,4 @@
+
 """Headless entry: python -m shape_crop.cli --config design.json --output result.png"""
 import argparse
 from shape_crop.services.project_io import load_project
