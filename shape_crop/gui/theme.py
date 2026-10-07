@@ -4,6 +4,10 @@ STYLESHEET = """
 QMainWindow { background: #f3f5f9; }
 QWidget { color: #263449; font-family: 'Microsoft YaHei UI', 'Segoe UI'; font-size: 12px; }
 QWidget#workspace, QWidget#controls, QScrollArea { background: transparent; }
+QTabWidget::pane { border: none; background: transparent; }
+QTabBar::tab { background: #eaf0f8; color: #52657e; border: 1px solid #dce3ed; border-radius: 7px; padding: 9px 20px; margin-right: 8px; }
+QTabBar::tab:selected { background: #356be5; color: #ffffff; border-color: #356be5; }
+QTabBar::tab:!selected:hover { background: #edf3ff; color: #285bcc; }
 QWidget#sidebar, QWidget#previewCard { background: #ffffff; border: 1px solid #e1e6ef; border-radius: 12px; }
 QLabel { background: transparent; border: none; }
 QLabel#title { font-size: 23px; font-weight: 600; color: #182b47; }

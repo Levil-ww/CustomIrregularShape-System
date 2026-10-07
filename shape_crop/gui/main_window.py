@@ -5,7 +5,7 @@ from shape_crop import __version__
 from PyQt5.QtCore import QSettings
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QLabel, QFileDialog, QComboBox, QSpinBox, QDoubleSpinBox,
-    QGroupBox, QMessageBox, QProgressBar, QCheckBox, QScrollArea, QSplitter)
+    QGroupBox, QMessageBox, QProgressBar, QCheckBox, QScrollArea, QSplitter, QTabWidget)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 from shape_crop.core.geometry import CircularBand, ArcBand
@@ -23,7 +23,7 @@ from shape_crop.services.catalog_session import CatalogSession
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f'圆桌 / 弧形台素材设计器 · 自动排版 {__version__}')
+        self.setWindowTitle(f'素材裁剪工作台 · {__version__}')
         self.resize(1280, 850)
         self.setMinimumSize(1000, 720)
         apply_theme(self)
@@ -44,7 +44,7 @@ class MainWindow(QMainWindow):
         heading = QVBoxLayout()
         title = QLabel('素材裁剪工作台')
         title.setObjectName('title')
-        subtitle = QLabel('圆桌 / 弧形台  ·  自动匹配素材，保留原图花纹与边框')
+        subtitle = QLabel('多模块素材裁剪  ·  本地处理，保留原图花纹与边框')
         subtitle.setObjectName('subtitle')
         heading.addWidget(title)
         heading.addWidget(subtitle)
@@ -54,9 +54,30 @@ class MainWindow(QMainWindow):
         badge.setObjectName('badge')
         header.addWidget(badge)
         page.addLayout(header)
+        self.module_tabs = QTabWidget()
+        page.addWidget(self.module_tabs, 1)
+        self.table_module = QWidget()
+        table_layout = QVBoxLayout(self.table_module)
+        table_layout.setContentsMargins(0, 12, 0, 0)
+        self.module_tabs.addTab(self.table_module, '圆桌 / 弧形台')
+        self.circle_module = QWidget()
+        circle_layout = QVBoxLayout(self.circle_module)
+        circle_layout.setContentsMargins(24, 24, 24, 24)
+        circle_layout.addStretch()
+        circle_title = QLabel('正圆 / 同心圆裁剪')
+        circle_title.setObjectName('sectionTitle')
+        circle_title.setAlignment(Qt.AlignCenter)
+        circle_layout.addWidget(circle_title)
+        circle_hint = QLabel('模块待开发\n\n此处预留正圆与同心圆裁剪入口。\n圆桌与弧形台排版请切换至「圆桌 / 弧形台」标签。')
+        circle_hint.setObjectName('hint')
+        circle_hint.setAlignment(Qt.AlignCenter)
+        circle_hint.setWordWrap(True)
+        circle_layout.addWidget(circle_hint)
+        circle_layout.addStretch()
+        self.module_tabs.addTab(self.circle_module, '正圆 / 同心圆（待开发）')
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
-        page.addWidget(splitter, 1)
+        table_layout.addWidget(splitter, 1)
         panel = QWidget()
         panel.setObjectName('sidebar')
         panel.setMinimumWidth(390)

@@ -90,7 +90,7 @@ class PreviewCanvas(QLabel):
 class ManualWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('手工排版 · 圆桌素材设计器')
+        self.setWindowTitle('手工排版 · 素材裁剪工作台')
         self.resize(1280, 860)
         apply_theme(self)
         self.base = DesignSpec()
