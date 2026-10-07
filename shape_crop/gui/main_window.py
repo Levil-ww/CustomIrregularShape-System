@@ -5,7 +5,8 @@ from shape_crop import __version__
 from PyQt5.QtCore import QSettings
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QLabel, QFileDialog, QComboBox, QSpinBox, QDoubleSpinBox,
-    QGroupBox, QMessageBox, QProgressBar, QCheckBox, QScrollArea, QSplitter, QTabWidget)
+    QGroupBox, QMessageBox, QProgressBar, QCheckBox, QScrollArea, QSplitter, QTabWidget,
+    QCompleter)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 from shape_crop.core.geometry import CircularBand, ArcBand
@@ -18,6 +19,9 @@ from shape_crop.services.workflow import output_path
 from shape_crop.workers.render_worker import WorkflowWorker
 from shape_crop.gui.theme import apply_theme
 from shape_crop.services.catalog_session import CatalogSession
+
+
+TARGET_HISTORY_LIMIT = 50
 
 
 class MainWindow(QMainWindow):
@@ -146,9 +150,25 @@ class MainWindow(QMainWindow):
         self.shape_mode.addItem('弧形台（最大宽度 + 总高 + 直边）', 'arc')
         controls.addWidget(self.shape_mode)
         controls.addWidget(QLabel('目标文件名'))
-        self.target = QLineEdit()
+        self.target_history = QComboBox()
+        self.target_history.setEditable(True)
+        self.target_history.setInsertPolicy(QComboBox.NoInsert)
+        self.target_history.setMinimumWidth(0)
+        self.target_history.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.target_history.setMaxVisibleItems(10)
+        self.target_history.addItems(self.settings.value('target_filename_history', [], type=list)[:TARGET_HISTORY_LIMIT])
+        self.target_history.setCurrentIndex(-1)
+        self.target_history.completer().setCompletionMode(QCompleter.PopupCompletion)
+        self.target = self.target_history.lineEdit()
         self.target.setPlaceholderText('双面格-定制-裁剪有图-花幔;80X140cm裁剪有图')
-        controls.addWidget(self.target)
+        self.target_history.setToolTip('输入新文件名或选择历史记录；启动预览或生成成品时保存，最多保留最近 50 条')
+        target_row = QHBoxLayout()
+        target_row.addWidget(self.target_history, 1)
+        self.clear_target_history_button = QPushButton('清空历史')
+        self.clear_target_history_button.setEnabled(self.target_history.count() > 0)
+        self.clear_target_history_button.clicked.connect(self.clear_target_history)
+        target_row.addWidget(self.clear_target_history_button)
+        controls.addLayout(target_row)
         self.target.textChanged.connect(self.target_changed)
         dimension_form = QFormLayout()
         self.width_value = QDoubleSpinBox()
@@ -256,6 +276,31 @@ class MainWindow(QMainWindow):
         self.cancel.clicked.connect(self.cancel_task)
         left.addWidget(self.cancel)
         self.update_dimensions()
+
+    def set_target_history(self, names):
+        current_text = self.target.text()
+        combo_blocked = self.target_history.blockSignals(True)
+        line_blocked = self.target.blockSignals(True)
+        try:
+            self.target_history.clear()
+            self.target_history.addItems(names)
+            self.target_history.setCurrentIndex(-1)
+            self.target.setText(current_text)
+        finally:
+            self.target.blockSignals(line_blocked)
+            self.target_history.blockSignals(combo_blocked)
+        self.clear_target_history_button.setEnabled(bool(names))
+        self.settings.setValue('target_filename_history', names)
+        self.settings.sync()
+
+    def remember_target(self, name):
+        names = [self.target_history.itemText(index)
+                 for index in range(self.target_history.count())
+                 if self.target_history.itemText(index) != name]
+        self.set_target_history(([name] + names)[:TARGET_HISTORY_LIMIT])
+
+    def clear_target_history(self):
+        self.set_target_history([])
 
     def directory_row(self, layout, title, key):
         layout.addWidget(QLabel(title))
@@ -460,6 +505,7 @@ class MainWindow(QMainWindow):
             self.worker.error.connect(self.show_error)
             self.worker.cancelled.connect(lambda: self.status.setText('已取消'))
             self.worker.finished.connect(self.task_finished)
+            self.remember_target(request.target_name)
             self.worker.start()
         except Exception as error:
             self.show_error(str(error))
