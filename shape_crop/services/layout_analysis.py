@@ -31,6 +31,23 @@ def _touching_ornament_end(pixels, row, left, right, run):
     return row + end if period else None
 
 
+def _blank_content_start(uniform, colours, depth, height, run):
+    """Exclude long artwork whitespace after an enclosed thin frame separator."""
+    if depth <= 1 or not uniform[depth - 1]:
+        return depth
+    background = colours[depth - 1]
+    matches = uniform & (np.max(np.abs(colours - background), axis=1) <= 18)
+    start = depth - 1
+    while start > 0 and matches[start - 1]:
+        start -= 1
+    if start == 0 or depth - start < max(6 * run, round(height * .10)):
+        return depth
+    # Require a bounded separator returning to the same background on both
+    # sides; a solid outer margin alone does not imply a sparse illustration.
+    earlier = np.flatnonzero(matches[max(0, start - 4 * run):start])
+    return start if earlier.size else depth
+
+
 def boundary_depth(pixels):
     """Scan one edge toward the middle, independent of the other three edge widths."""
     height, width = pixels.shape[:2]
@@ -72,7 +89,7 @@ def boundary_depth(pixels):
             ornament_end = _touching_ornament_end(pixels, row, columns[0], columns[-1] + 1, run)
             depth = ornament_end if ornament_end is not None else row
             break
-    return depth or 0
+    return _blank_content_start(uniform, median, depth, height, run) if depth else 0
 
 
 def analyze_layout(image):
