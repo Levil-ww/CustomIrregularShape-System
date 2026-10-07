@@ -56,7 +56,10 @@ def boundary_depth(pixels):
                 # frame ornament must be a shallow band with a compact repeat;
                 # do not scan through a full floral tile to its next blank gap.
                 band_depth = end - row
-                if period and band_depth <= 3 * run and period <= max(4 * run, 2 * band_depth):
+                # Round beads can span about four recognition runs, including
+                # their outline. Keep the compact-repeat guard so large tiled
+                # flowers still stop the scan at the content boundary.
+                if period and band_depth <= 4 * run and period <= max(4 * run, 2 * band_depth):
                     continue
                 # A sentence is not periodic. Keep sparse ink on the preceding
                 # flat background when it is enclosed by another flat row.
