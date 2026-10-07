@@ -52,7 +52,11 @@ def boundary_depth(pixels):
             if following.size:
                 end = row + int(following[0])
                 _, period = extract_period(pixels[row:end, columns[0]:columns[-1] + 1])
-                if period:
+                # Repetition alone also describes tiled interior artwork. A
+                # frame ornament must be a shallow band with a compact repeat;
+                # do not scan through a full floral tile to its next blank gap.
+                band_depth = end - row
+                if period and band_depth <= 3 * run and period <= max(4 * run, 2 * band_depth):
                     continue
                 # A sentence is not periodic. Keep sparse ink on the preceding
                 # flat background when it is enclosed by another flat row.
@@ -60,7 +64,7 @@ def boundary_depth(pixels):
                 background = median[row - 1]
                 matches = np.max(np.abs(rows[row:end] - background), axis=2) <= 18
                 enclosed = np.max(np.abs(median[end] - background)) <= 18
-                if enclosed and np.mean(matches) >= .45 and np.min(np.mean(matches, axis=1)) >= .25:
+                if not period and enclosed and np.mean(matches) >= .45 and np.min(np.mean(matches, axis=1)) >= .25:
                     continue
             ornament_end = _touching_ornament_end(pixels, row, columns[0], columns[-1] + 1, run)
             depth = ornament_end if ornament_end is not None else row
