@@ -57,19 +57,27 @@ def render_source(design, material, inner_material=None, max_side=None, progress
         depth = shape.depth(x, y)
         rgb = mapping.sample(layout, x, y)
         if border_cm:
+            # Interior pixels have zero frame coverage. Keep their original
+            # artwork and avoid perimeter geometry/interpolation for them.
+            border_pixels = depth < border_cm + px_cm / 2
+            rows, columns = np.nonzero(border_pixels)
+            border_depth = depth[rows, columns]
             # Continuous clockwise coordinates rotate the lower text by 180 degrees.
             # A reflected y coordinate would mirror every glyph on the lower half.
-            s = inset_boundary_fraction(shape, x, y, np.clip(depth, 0, border_cm), ring) * ring.perimeter
-            source_depth_cm = depth
+            s = inset_boundary_fraction(shape, x[0, columns], y[rows, 0],
+                                        np.clip(border_depth, 0, border_cm), ring) * ring.perimeter
+            source_depth_cm = border_depth
             if plain_band:
                 band_start, band_end = (value * scale for value in plain_band)
-                source_depth_cm = np.where(depth < band_start, depth,
-                    np.where(depth < band_end + extra_cm,
-                             band_start + (depth - band_start) * (band_end - band_start) / (band_end - band_start + extra_cm),
-                             depth - extra_cm))
+                source_depth_cm = np.where(border_depth < band_start, border_depth,
+                    np.where(border_depth < band_end + extra_cm,
+                             band_start + (border_depth - band_start) * (band_end - band_start) / (band_end - band_start + extra_cm),
+                             border_depth - extra_cm))
             stripe = sample_perimeter_strip(layout.strip, s, np.maximum(0, source_depth_cm / scale - .5),
                                              ring.perimeter, scale, origin)
-            blend(rgb, stripe, cov(border_cm - depth))
+            border_rgb = rgb[rows, columns]
+            blend(border_rgb, stripe, cov(border_cm - border_depth))
+            rgb[rows, columns] = border_rgb
         if design.inner_diameter_cm:
             radius = design.inner_diameter_cm / 2
             selected = inner_material or material

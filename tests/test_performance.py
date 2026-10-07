@@ -73,18 +73,20 @@ def test_export_progress_finishes_only_after_file_is_saved(tmp_path):
     from shape_crop.services.design_service import generate
     from shape_crop.models.design import DesignSpec
     from shape_crop.services import design_service
-    progress, statuses = [], []
+    progress, statuses, timings = [], [], {}
     output = tmp_path / 'output.jpg'
     def save(*args):
         assert progress[-1] < 100
         save_image(*args)
     with patch.object(design_service, 'save_image', side_effect=save):
         generate(DesignSpec(diameter_cm=20, height_cm=20, dpi=20), output=output,
-                 progress=progress.append, status=statuses.append)
+                 progress=progress.append, status=statuses.append, timings=timings)
     assert output.is_file()
     assert progress[-1] == 100
     assert progress == sorted(progress)
     assert '保存' in statuses[-1]
+    assert set(timings) == {'prepare', 'render', 'save'}
+    assert all(value >= 0 for value in timings.values())
 
 
 def test_float32_sampling_stays_within_one_channel_level():
@@ -105,3 +107,67 @@ def test_float32_sampling_stays_within_one_channel_level():
         b = image[y1, x0].astype(np.float32) * (1 - fx) + image[y1, x1] * fx
         reference = np.clip(a * (1 - fy) + b * fy, 0, 255).astype(np.uint8)
         assert np.abs(actual.astype(int) - reference.astype(int)).max() <= 1
+
+
+@pytest.mark.parametrize('shape_mode', ['circular', 'arc'])
+@pytest.mark.parametrize('side_border', [20, 40])
+def test_source_border_only_samples_covered_pixels_and_matches_dense_render(shape_mode, side_border):
+    from shape_crop.core import source_renderer
+    from shape_crop.core.content_mapping import ContentMapping
+    from shape_crop.core.geometry import create_shape, inset_boundary_fraction
+    from shape_crop.core.renderer import blend
+    from shape_crop.core.sampling import sample_perimeter_strip, uniform_strip_band
+    from shape_crop.models.design import DesignSpec, BorderSpec
+    from shape_crop.services.layout_analysis import SourceLayout
+    from shape_crop.services.materials import PreparedMaterial
+
+    pixels = np.random.default_rng(19).integers(0, 256, (240, 400, 3), dtype=np.uint8)
+    strip = pixels[:20, :100].copy()
+    strip[4:12] = 240
+    layout = SourceLayout(pixels, strip, 20, 400, 240, '',
+                          pixels[20:-20, side_border:-side_border],
+                          (side_border, 20, 400 - side_border, 220), 100)
+    material = PreparedMaterial(pixels, strip, MaterialSpec(), layout)
+    design = DesignSpec(diameter_cm=40, height_cm=24, dpi=30,
+                        border=BorderSpec(0, 0, 0), shape_mode=shape_mode, straight_cm=30)
+    width, height = design.pixel_size()
+    x = ((np.arange(width, dtype=np.float32) + .5) / width - .5)[None, :] * 40
+    y = ((np.arange(height, dtype=np.float32) + .5) / height - .5)[:, None] * 24
+    shape = create_shape(design)
+    depth = shape.depth(x, y)
+    scale = ContentMapping.source_scale(layout, 40, 24)
+    native_border = layout.border_depth_px * scale
+    border = max(native_border, ContentMapping.required_border(layout, 40, 24))
+    extra = border - native_border
+    plain_band = uniform_strip_band(strip) if extra else None
+    px_cm = max(40 / width, 24 / height)
+    ornament = np.max(np.ptp(strip, axis=1), axis=1).astype(np.float64)
+    source_depth = float(np.average(np.arange(len(ornament)) + .5, weights=ornament))
+    ring_depth = source_depth * scale
+    if plain_band and source_depth >= plain_band[1]:
+        ring_depth += extra
+    ring = shape.inset(ring_depth)
+    arc = inset_boundary_fraction(shape, x, y, np.clip(depth, 0, border), ring) * ring.perimeter
+    expected = ContentMapping.create(layout, 40, 24, border).sample(layout, x, y)
+    sample_depth = depth
+    if plain_band:
+        start, end = (value * scale for value in plain_band)
+        sample_depth = np.where(depth < start, depth,
+                               np.where(depth < end + extra,
+                                        start + (depth - start) * (end - start) / (end - start + extra),
+                                        depth - extra))
+    stripe = sample_perimeter_strip(strip, arc, np.maximum(0, sample_depth / scale - .5),
+                                    ring.perimeter, scale, (100 - ring.chord / scale) / 2)
+    blend(expected, stripe, np.clip((border - depth) / px_cm + .5, 0, 1))
+    sampled_pixels = []
+
+    def counted_sample(image, arc_length, *args):
+        sampled_pixels.append(arc_length.size)
+        return sample_perimeter_strip(image, arc_length, *args)
+
+    with patch.object(source_renderer, 'sample_perimeter_strip', side_effect=counted_sample):
+        actual = np.asarray(source_renderer.render_source(design, material))
+    np.testing.assert_array_equal(actual[..., :3], expected)
+    np.testing.assert_array_equal(actual[..., 3],
+                                  np.round(np.clip(depth / px_cm + .5, 0, 1) * 255).astype(np.uint8))
+    assert sum(sampled_pixels) == np.count_nonzero(depth < border + px_cm / 2), '只计算实际覆盖的边框像素'

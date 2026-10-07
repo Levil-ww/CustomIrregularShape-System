@@ -444,6 +444,7 @@ class MainWindow(QMainWindow):
             self.show_error(str(error))
 
     def task_result(self, result):
+        self.status.setToolTip('')
         self.match_label.setText(result['match_info'])
         self.match_label.setToolTip(result['match_info'])
         if result['image'] is not None:
@@ -453,7 +454,12 @@ class MainWindow(QMainWindow):
             self.status.setText('自动预览已生成 · 匹配 {:.2f}s · 预览 {:.2f}s'.format(
                 timings.get('match', 0), timings.get('generate', 0)))
         else:
-            self.status.setText('成品已保存：' + result['output'])
+            timings = result.get('timings', {})
+            self.status.setText('成品已保存：{} · 用时 {:.2f}s'.format(
+                result['output'], timings.get('match', 0) + timings.get('generate', 0)))
+            self.status.setToolTip('匹配 {:.2f}s · 素材读取与分析 {:.2f}s · 渲染 {:.2f}s · 保存 {:.2f}s'.format(
+                timings.get('match', 0), timings.get('prepare', 0),
+                timings.get('render', 0), timings.get('save', 0)))
 
     def task_finished(self):
         worker, self.worker = self.worker, None

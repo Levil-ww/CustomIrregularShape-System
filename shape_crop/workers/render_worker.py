@@ -49,11 +49,13 @@ class WorkflowWorker(QThread):
             matched = perf_counter()
             self.status.emit('读取原素材边框层次与花纹…')
             reports = []
+            timings = dict(match=matched - started)
             image = generate(design, self.preview, self.output, self.progress.emit,
-                             self.isInterruptionRequested, reports.append, self.status.emit)
+                             self.isInterruptionRequested, reports.append, self.status.emit, timings=timings)
+            timings['generate'] = perf_counter() - matched
             self.result.emit(dict(image=image if self.preview else None, design=design,
                                   match_info=match_info + '\n' + '\n'.join(reports), output=self.output,
-                                  timings=dict(match=matched - started, generate=perf_counter() - matched)))
+                                  timings=timings))
         except RenderCancelled:
             self.cancelled.emit()
         except Exception as error:
