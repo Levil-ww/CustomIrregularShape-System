@@ -135,6 +135,10 @@ def _sentence_layer(strip):
     columns = np.flatnonzero(np.any(ink, axis=0))
     if not columns.size:
         return None
+    # Full-span English can have sparse strokes too. It belongs to continuous
+    # perimeter mapping; treating it as four local sentences cuts the side ink.
+    if columns[-1] - columns[0] + 1 >= strip.shape[1] * .8:
+        return None
     offset = round((strip.shape[1] - 1 - columns[0] - columns[-1]) / 2)
     alpha = np.zeros(strip.shape[:2], dtype=np.uint8)
     alpha[rows] = (np.max(np.abs(selected - background[:, None, :]), axis=2) > 8) * 255
@@ -234,6 +238,10 @@ def analyze_layout(image):
     message = f'自动读取完整边框带：{depth / height * 100:.2f}% 短边，原色原层次' if depth else '未检测到稳定边框分隔线，保留原图填充；可用高级选区'
     if period:
         message += f'；装饰周期 {period}px'
+    elif sentence:
+        message += '；局部英文保留原位置'
+    elif np.any(np.std(region.astype(np.float32), axis=1) > 2):
+        message += '；满幅装饰带连续环绕'
     if floating is not None:
         message += '；独立图案留白类：完整图案组等比适配，保留原素材最小留白距离'
     return SourceLayout(pixels, strip, depth, width, height, message, content,
