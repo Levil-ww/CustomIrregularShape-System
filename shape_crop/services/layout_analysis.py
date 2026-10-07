@@ -33,19 +33,28 @@ def _touching_ornament_end(pixels, row, left, right, run):
 
 def _blank_content_start(uniform, colours, depth, height, run):
     """Exclude long artwork whitespace after an enclosed thin frame separator."""
-    if depth <= 1 or not uniform[depth - 1]:
+    if depth <= 1:
         return depth
-    background = colours[depth - 1]
-    matches = uniform & (np.max(np.abs(colours - background), axis=1) <= 18)
-    start = depth - 1
-    while start > 0 and matches[start - 1]:
-        start -= 1
-    if start == 0 or depth - start < max(6 * run, round(height * .10)):
-        return depth
-    # Require a bounded separator returning to the same background on both
-    # sides; a solid outer margin alone does not imply a sparse illustration.
-    earlier = np.flatnonzero(matches[max(0, start - 4 * run):start])
-    return start if earlier.size else depth
+    end = depth
+    while end > max(0, depth - 4 * run):
+        if not uniform[end - 1]:
+            end -= 1
+            continue
+        background = colours[end - 1]
+        matches = uniform & (np.max(np.abs(colours - background), axis=1) <= 18)
+        start = end - 1
+        while start > 0 and matches[start - 1]:
+            start -= 1
+        if start == 0:
+            return depth
+        if end - start >= max(6 * run, round(height * .10)):
+            # Require a bounded separator returning to the same background on
+            # both sides. A horizontal artwork line can follow the blank area;
+            # it belongs to content and must not become a perimeter stripe.
+            earlier = np.flatnonzero(matches[max(0, start - 4 * run):start])
+            return start if earlier.size else depth
+        end = start
+    return depth
 
 
 def boundary_depth(pixels):
