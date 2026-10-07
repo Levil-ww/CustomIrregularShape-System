@@ -154,19 +154,33 @@ def inset_boundary_fraction(shape, x, y, depth, reference=None):
     angle = np.arcsin(np.clip(half_h / radius, 0, 1))
     chord = 2 * (center + np.sqrt(np.maximum(0, radius**2 - half_h**2)))
     arc_length = 2 * radius * angle
-    # Anchor each straight/arc section independently. Scaling the whole perimeter
-    # would accumulate a radial phase shift and turn straight text into italics.
+    # Straight sections use physical x, shared by every radial row. Normalizing
+    # x by each inset chord shears circles and turns upright letters into italics.
     ref_chord = reference.chord if reference is not None else chord
     ref_arc = 2 * reference.radius * reference.angle if reference is not None else arc_length
     perimeter = 2 * ref_chord + 2 * ref_arc
     theta = np.arctan2(y, np.abs(x) - center)
     radial_depth = shape.radius - np.hypot(np.abs(x) - center, y)
     on_line = shape.half_height - np.abs(y) <= radial_depth
-    top = np.clip(x / np.maximum(chord, 1e-6) + .5, 0, 1) * ref_chord
-    bottom = ref_chord + ref_arc + np.clip(.5 - x / np.maximum(chord, 1e-6), 0, 1) * ref_chord
+    line_x = np.clip(x, -chord / 2, chord / 2)
+    top = line_x + ref_chord / 2
+    bottom = ref_chord + ref_arc + ref_chord / 2 - line_x
     phase = (np.clip(theta, -angle, angle) + angle) / (2 * angle)
     right = ref_chord + phase * ref_arc
     left = 2 * ref_chord + ref_arc + (1 - phase) * ref_arc
+    if reference is not None:
+        clipped_theta = np.clip(theta, -angle, angle)
+        right = ref_chord + reference.radius * (clipped_theta + reference.angle)
+        left = 2 * ref_chord + ref_arc + reference.radius * (reference.angle - clipped_theta)
+        # Confine the miter adjustment to the straight/arc joint. Away from it,
+        # a fixed angular origin prevents radial rows from drifting in phase.
+        transition = max(min(2 * (shape.radius - reference.radius),
+                             reference.radius * .02), 1e-6)
+        weight = np.clip(1 - (angle - np.abs(clipped_theta)) * reference.radius / transition, 0, 1)
+        correction = ((chord - ref_chord) / 2 +
+                      reference.radius * (angle - reference.angle)) * weight
+        right -= np.sign(clipped_theta) * correction
+        left += np.sign(clipped_theta) * correction
     coordinate = np.where(on_line, np.where(y <= 0, top, bottom),
                           np.where(x >= 0, right, left))
     return (coordinate / perimeter) % 1

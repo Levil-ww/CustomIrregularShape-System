@@ -2,7 +2,7 @@
 import numpy as np
 from PIL import Image
 from shape_crop.core.geometry import create_shape, inset_boundary_fraction
-from shape_crop.core.sampling import sample_perimeter_strip
+from shape_crop.core.sampling import sample_perimeter_strip, uniform_strip_band
 from shape_crop.core.content_mapping import ContentMapping
 from shape_crop.core.renderer import RenderCancelled, blend
 
@@ -17,7 +17,8 @@ def render_source(design, material, inner_material=None, max_side=None, progress
     # One uniform scale covers both target dimensions; do not stretch the frame
     # to compensate for missing source height.
     scale = ContentMapping.source_scale(layout, design.diameter_cm, design.height_cm)
-    border_cm = layout.border_depth_px * scale
+    native_border_cm = layout.border_depth_px * scale
+    border_cm = native_border_cm
     # Use one symmetric frame width covering all original edges and the size allowance.
     # Every frame layer shares this radial scale; artwork uses one uniform transform.
     required_border = ContentMapping.required_border(layout, design.diameter_cm, design.height_cm)
@@ -29,7 +30,19 @@ def render_source(design, material, inner_material=None, max_side=None, progress
         raise ValueError('内圆超出自动识别的外边框内侧')
     mapping = ContentMapping.create(layout, design.diameter_cm, design.height_cm, border_cm)
     px_cm = max(design.diameter_cm / width, design.height_cm / height)
-    ring = shape.inset(border_cm / 2) if border_cm else shape
+    extra_cm = border_cm - native_border_cm
+    plain_band = uniform_strip_band(layout.strip) if extra_cm > 1e-9 else None
+    if extra_cm > 1e-9 and plain_band is None:
+        raise ValueError('当前素材边框需要加宽，但没有足够的纯色留白；为避免装饰变形，请换用比例更接近或四边边框一致的素材')
+    # Anchor tangential scale near the artwork, not in the expanded blank margin.
+    ornament = np.max(np.ptp(layout.strip, axis=1), axis=1).astype(np.float64)
+    ring_depth = native_border_cm / 2
+    if ornament.sum():
+        source_depth = float(np.average(np.arange(len(ornament)) + .5, weights=ornament))
+        ring_depth = source_depth * scale
+        if plain_band and source_depth >= plain_band[1]:
+            ring_depth += extra_cm
+    ring = shape.inset(ring_depth) if border_cm else shape
     strip_width = layout.strip.shape[1]
     origin = (strip_width - ring.chord / scale) / 2
     x = ((np.arange(width, dtype=np.float32) + .5) / width - .5)[None, :] * design.diameter_cm
@@ -47,8 +60,14 @@ def render_source(design, material, inner_material=None, max_side=None, progress
             # Continuous clockwise coordinates rotate the lower text by 180 degrees.
             # A reflected y coordinate would mirror every glyph on the lower half.
             s = inset_boundary_fraction(shape, x, y, np.clip(depth, 0, border_cm), ring) * ring.perimeter
-            frame_scale = border_cm / layout.border_depth_px
-            stripe = sample_perimeter_strip(layout.strip, s, np.maximum(0, depth / frame_scale - .5),
+            source_depth_cm = depth
+            if plain_band:
+                band_start, band_end = (value * scale for value in plain_band)
+                source_depth_cm = np.where(depth < band_start, depth,
+                    np.where(depth < band_end + extra_cm,
+                             band_start + (depth - band_start) * (band_end - band_start) / (band_end - band_start + extra_cm),
+                             depth - extra_cm))
+            stripe = sample_perimeter_strip(layout.strip, s, np.maximum(0, source_depth_cm / scale - .5),
                                              ring.perimeter, scale, origin)
             blend(rgb, stripe, cov(border_cm - depth))
         if design.inner_diameter_cm:

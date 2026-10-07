@@ -31,6 +31,24 @@ def sample_perimeter_strip(image, arc_length, depth_px, perimeter_cm, source_sca
     return sample(image, u, depth_px, wrap_x=True)
 
 
+def uniform_strip_band(strip):
+    """Find the longest flat colour band that can absorb extra frame clearance."""
+    uniform = np.max(np.ptp(strip, axis=1), axis=1) <= 8
+    colours = np.mean(strip, axis=1)
+    best, start = (0, 0), None
+    for row in range(len(strip)):
+        same_colour = row == 0 or np.max(np.abs(colours[row] - colours[row - 1])) <= 8
+        if start is not None and (not uniform[row] or not same_colour):
+            if row - start > best[1] - best[0]:
+                best = (start, row)
+            start = None
+        if uniform[row] and start is None:
+            start = row
+    if start is not None and len(strip) - start > best[1] - best[0]:
+        best = (start, len(strip))
+    return best if best[1] - best[0] >= 3 else None
+
+
 def content_sample(image, x, y, width_cm, height_cm, material):
     h, w = image.shape[:2]
     if material.fit == 'tile':

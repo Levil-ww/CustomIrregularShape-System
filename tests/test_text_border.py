@@ -55,10 +55,16 @@ def test_text_coordinates_follow_each_inset_joint_and_rotate_lower_half(shape):
     reference = shape.inset(4)
     for depth in (1, 4, 7):
         inner = shape.inset(depth)
-        # Every radial row joins the same text phase; no letter is cut at a joint.
+        # Joint phase follows physical x so upright text is not sheared.
         actual = inset_boundary_fraction(shape, inner.chord / 2, -inner.half_height,
                                          depth, reference)
-        assert actual == pytest.approx(reference.chord / reference.perimeter)
+        assert actual == pytest.approx((reference.chord + inner.chord) / 2 / reference.perimeter)
+        epsilon = 1e-7
+        before = inset_boundary_fraction(shape, inner.chord / 2 - epsilon,
+            -inner.half_height, depth, reference)
+        after = inset_boundary_fraction(shape, inner.chord / 2 + epsilon,
+            -inner.half_height, depth, reference)
+        assert abs(after - before) < 1e-7, '直边与圆弧接头相位不连续'
         xs = np.linspace(-inner.chord / 2, inner.chord / 2, 15)
         top = inset_boundary_fraction(shape, xs, -inner.half_height, depth, reference)
         bottom = inset_boundary_fraction(shape, -xs, inner.half_height, depth, reference)
