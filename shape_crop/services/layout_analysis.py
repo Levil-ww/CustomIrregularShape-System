@@ -16,6 +16,8 @@ class SourceLayout:
     content: np.ndarray
     content_box_px: tuple[int, int, int, int]
     strip_period_px: int = 0
+    strip_is_sentence: bool = False
+    sentence_layers: tuple = ()
 
 
 def _touching_ornament_end(pixels, row, left, right, run):
@@ -98,7 +100,45 @@ def boundary_depth(pixels):
             ornament_end = _touching_ornament_end(pixels, row, columns[0], columns[-1] + 1, run)
             depth = ornament_end if ornament_end is not None else row
             break
-    return _blank_content_start(uniform, median, depth, height, run) if depth else 0
+    scan_end = depth or limit
+    blank_start = _blank_content_start(uniform, median, scan_end, height, run)
+    if blank_start < scan_end:
+        # The 93% flat-row criterion may classify a few glyph descenders as
+        # blank. Keep them until three completely clear sampled rows follow.
+        end = min(limit, blank_start + 4 * run)
+        background = median[end - 1]
+        clear = np.all(np.max(np.abs(rows[blank_start:end] - background), axis=2) <= 18, axis=1)
+        for offset in range(len(clear) - 2):
+            if np.all(clear[offset:offset + 3]):
+                return blank_start + offset
+        return blank_start
+    if depth:
+        return depth
+    # A centred illustration can lie beyond this edge's bounded scan. A long
+    # blank region after an enclosed frame still identifies a valid boundary.
+    return 0
+
+
+def _sentence_layer(strip):
+    """Extract sparse original ink and its tangential source anchor."""
+    variation = np.std(strip.astype(np.float32), axis=1).mean(axis=1)
+    rows = np.flatnonzero(variation > max(2., variation.max() * .25))
+    if not rows.size:
+        return None
+    selected = strip[rows].astype(np.float32)
+    background = np.median(selected, axis=1)
+    ink = np.max(np.abs(selected - background[:, None, :]), axis=2) > 30
+    if np.mean(ink) > .45:
+        return None
+    columns = np.flatnonzero(np.any(ink, axis=0))
+    if not columns.size:
+        return None
+    offset = round((strip.shape[1] - 1 - columns[0] - columns[-1]) / 2)
+    alpha = np.zeros(strip.shape[:2], dtype=np.uint8)
+    alpha[rows] = (np.max(np.abs(selected - background[:, None, :]), axis=2) > 8) * 255
+    layer = np.concatenate((strip, alpha[..., None]), axis=2)
+    anchor = (columns[0] + columns[-1]) / 2 / max(1, strip.shape[1] - 1)
+    return np.roll(layer, offset, axis=1), float(anchor)
 
 
 def analyze_layout(image):
@@ -149,10 +189,26 @@ def analyze_layout(image):
     strip, period = extract_period(region)
     if not period:
         strip, period = extract_dark_period(region)
+    sentence = False
+    layers = ()
+    if not period:
+        top_layer = _sentence_layer(region)
+        if top_layer is not None:
+            sentence = True
+            # Preserve each original edge separately in clockwise order. Their
+            # anchors retain diagonal placement instead of inventing repeats.
+            layers = (top_layer,
+                _sentence_layer(pixels[top:bottom, right:][:, ::-1].transpose(1, 0, 2)),
+                _sentence_layer(pixels[bottom:, safe_left:safe_right][::-1, ::-1]),
+                _sentence_layer(pixels[top:bottom, :left].transpose(1, 0, 2)[:, ::-1]))
+            # Use a continuous frame without the source sentence; original ink
+            # is applied separately at its own source anchor on each edge.
+            strip = np.repeat(np.median(region, axis=1).astype(np.uint8)[:, None, :],
+                              region.shape[1], axis=1)
     # Sampling is read-only; a view avoids retaining a second near-full image.
     content = pixels[top:bottom, left:right]
     message = f'自动读取完整边框带：{depth / height * 100:.2f}% 短边，原色原层次' if depth else '未检测到稳定边框分隔线，保留原图填充；可用高级选区'
     if period:
         message += f'；装饰周期 {period}px'
     return SourceLayout(pixels, strip, depth, width, height, message, content,
-                        (left, top, right, bottom), period)
+                        (left, top, right, bottom), period, sentence, layers)

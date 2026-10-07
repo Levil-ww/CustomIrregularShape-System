@@ -31,6 +31,43 @@ def sample_perimeter_strip(image, arc_length, depth_px, perimeter_cm, source_sca
     return sample(image, u, depth_px, wrap_x=True)
 
 
+def sample_sentence_strip(image, arc_length, depth_px, segment_lengths_cm, source_scale_cm,
+                          sentence_layers):
+    """Apply original edge ink at its source anchor without perimeter repeats."""
+    lengths = np.asarray(segment_lengths_cm, dtype=np.float64)
+    ends = np.cumsum(lengths)
+    position = np.asarray(arc_length) % ends[-1]
+    segment = np.minimum(np.searchsorted(ends, position, side='right'), len(lengths) - 1)
+    starts = np.r_[0., ends[:-1]]
+    depths = np.broadcast_to(depth_px, position.shape)
+    result = sample(image, np.zeros_like(position), depths)
+    for index, entry in enumerate(sentence_layers):
+        if entry is None:
+            continue
+        layer, anchor = entry
+        selected = segment == index
+        ink_columns = np.flatnonzero(np.any(layer[..., 3] > 0, axis=0))
+        if not ink_columns.size:
+            continue
+        half_ink_px = (ink_columns[-1] - ink_columns[0] + 1) / 2
+        half_ink_cm = half_ink_px * source_scale_cm
+        half_fraction = half_ink_px / max(1, layer.shape[1] - 1)
+        ink_rows = np.flatnonzero(np.any(layer[..., 3] > 0, axis=1))
+        clearance = (ink_rows[-1] - ink_rows[0] + 1) * source_scale_cm
+        if anchor < .5:
+            centre = max(clearance, max(0., anchor - half_fraction) * lengths[index]) + half_ink_cm
+        else:
+            centre = lengths[index] - max(clearance, max(0., 1 - anchor - half_fraction) * lengths[index]) - half_ink_cm
+        local = position[selected] - starts[index] - centre
+        u = (layer.shape[1] - 1) / 2 + local / source_scale_cm
+        ink = sample(layer, u, depths[selected])
+        alpha = ink[..., 3:4].astype(np.float32) / 255
+        valid = (u >= 0) & (u <= layer.shape[1] - 1) & (depths[selected] >= 0) & (depths[selected] <= layer.shape[0] - 1)
+        alpha *= valid[..., None]
+        result[selected] = np.clip(result[selected] * (1 - alpha) + ink[..., :3] * alpha, 0, 255).astype(np.uint8)
+    return result
+
+
 def uniform_strip_band(strip):
     """Find the longest flat colour band that can absorb extra frame clearance."""
     uniform = np.max(np.ptp(strip, axis=1), axis=1) <= 8

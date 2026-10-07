@@ -76,6 +76,7 @@ def prepare(material, preview=False):
     arrays = [result.content, result.strip]
     if result.source_layout:
         arrays.extend((result.source_layout.image, result.source_layout.content))
+        arrays.extend(entry[0] for entry in result.source_layout.sentence_layers if entry is not None)
     arrays = {id(array): array for array in arrays}.values()
     size = 0
     owners = set()

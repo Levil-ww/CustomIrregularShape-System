@@ -2,7 +2,7 @@
 import numpy as np
 from PIL import Image
 from shape_crop.core.geometry import create_shape, inset_boundary_fraction
-from shape_crop.core.sampling import sample_perimeter_strip, uniform_strip_band
+from shape_crop.core.sampling import sample_perimeter_strip, sample_sentence_strip, uniform_strip_band
 from shape_crop.core.content_mapping import ContentMapping
 from shape_crop.core.renderer import RenderCancelled, blend
 
@@ -73,8 +73,15 @@ def render_source(design, material, inner_material=None, max_side=None, progress
                     np.where(border_depth < band_end + extra_cm,
                              band_start + (border_depth - band_start) * (band_end - band_start) / (band_end - band_start + extra_cm),
                              border_depth - extra_cm))
-            stripe = sample_perimeter_strip(layout.strip, s, np.maximum(0, source_depth_cm / scale - .5),
-                                             ring.perimeter, scale, origin)
+            sample_depth = np.maximum(0, source_depth_cm / scale - .5)
+            if layout.strip_is_sentence:
+                side_length = (ring.perimeter - 2 * ring.chord) / 2
+                stripe = sample_sentence_strip(layout.strip, s, sample_depth,
+                    (ring.chord, side_length, ring.chord, side_length), scale,
+                    layout.sentence_layers)
+            else:
+                stripe = sample_perimeter_strip(layout.strip, s, sample_depth,
+                                                 ring.perimeter, scale, origin)
             border_rgb = rgb[rows, columns]
             blend(border_rgb, stripe, cov(border_cm - border_depth))
             rgb[rows, columns] = border_rgb
