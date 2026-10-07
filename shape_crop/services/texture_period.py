@@ -2,6 +2,17 @@
 import numpy as np
 
 
+def extract_dark_period(strip):
+    """Recognize periodic dark ink even when its background contains artwork."""
+    dark = np.max(strip, axis=2) < 40
+    mask = np.repeat(np.where(dark[..., None], 0, 255).astype(np.uint8), 3, axis=2)
+    _, period = extract_period(mask)
+    if not period or strip.shape[1] < 8 * period:
+        return strip.copy(), 0
+    start = (strip.shape[1] - period) // 2
+    return strip[:, start:start + period].copy(), period
+
+
 def extract_period(strip):
     height, width = strip.shape[:2]
     if width < 12:

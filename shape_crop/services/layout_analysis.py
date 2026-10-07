@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 import numpy as np
 from PIL import Image
-from shape_crop.services.texture_period import extract_period
+from shape_crop.services.texture_period import extract_period, extract_dark_period
 
 
 @dataclass(frozen=True)
@@ -16,6 +16,19 @@ class SourceLayout:
     content: np.ndarray
     content_box_px: tuple[int, int, int, int]
     strip_period_px: int = 0
+
+
+def _touching_ornament_end(pixels, row, left, right, run):
+    """Keep a short periodic dark ornament that overlaps non-periodic content."""
+    region = pixels[row:row + max(8, 3 * run), left:right]
+    active = np.flatnonzero(np.mean(np.max(region, axis=2) < 40, axis=1) >= .01)
+    if (len(active) < 3 or active[0] >= run or
+            active[-1] >= len(region) - 2 or np.any(np.diff(active) > 1)):
+        return None
+    # Require the complete bounded ink run, not a periodic one-row fragment.
+    end = int(active[-1]) + 2
+    _, period = extract_dark_period(region[:end])
+    return row + end if period else None
 
 
 def boundary_depth(pixels):
@@ -49,7 +62,8 @@ def boundary_depth(pixels):
                 enclosed = np.max(np.abs(median[end] - background)) <= 18
                 if enclosed and np.mean(matches) >= .45 and np.min(np.mean(matches, axis=1)) >= .25:
                     continue
-            depth = row
+            ornament_end = _touching_ornament_end(pixels, row, columns[0], columns[-1] + 1, run)
+            depth = ornament_end if ornament_end is not None else row
             break
     return depth or 0
 
@@ -93,7 +107,10 @@ def analyze_layout(image):
         raise ValueError('原素材内容区识别失败，四边边框已占满图片')
     # Extract only the safe horizontal span. Side borders need not equal the top depth.
     safe_left, safe_right = min(left + 1, right - 1), max(left + 1, right - 1)
-    strip, period = extract_period(pixels[:max(1, depth), safe_left:safe_right])
+    region = pixels[:max(1, depth), safe_left:safe_right]
+    strip, period = extract_period(region)
+    if not period:
+        strip, period = extract_dark_period(region)
     # Sampling is read-only; a view avoids retaining a second near-full image.
     content = pixels[top:bottom, left:right]
     message = f'自动读取完整边框带：{depth / height * 100:.2f}% 短边，原色原层次' if depth else '未检测到稳定边框分隔线，保留原图填充；可用高级选区'
