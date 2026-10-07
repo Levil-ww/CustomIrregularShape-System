@@ -3,7 +3,7 @@ from dataclasses import replace
 from pathlib import Path
 import math
 from shape_crop.models.design import DesignSpec, MaterialSpec, BorderSpec
-from shape_crop.services.catalog import match_material
+from shape_crop.services.catalog import MAX_RATIO_ERROR, match_material
 from shape_crop.services.filename_parser import parse_filename
 
 
@@ -33,6 +33,11 @@ def resolve_request(request, cancelled=None, status=None, catalog_session=None):
                  match_material(target, request.library_dir, cancelled, status))
         path = match.path
         detail = f'匹配 {match.source.width_cm:g} × {match.source.height_cm:g}cm；比例差 {math.expm1(match.ratio_error) * 100:.2f}%'
+        if (match.source.width_cm < target.width_cm * .80 or
+                match.source.height_cm < target.height_cm * .80):
+            detail += '\n提示：素材尺寸偏小，至少一边不足目标尺寸的 80%，放大后清晰度可能降低'
+        if match.ratio_error > MAX_RATIO_ERROR:
+            detail += '\n提示：未找到比例差 ≤5% 的素材，已使用兜底素材，花纹裁剪可能增加'
     design = replace(design, material=MaterialSpec(path=path))
     design.validate()
     return design, f'{detail}\n素材：{path}'

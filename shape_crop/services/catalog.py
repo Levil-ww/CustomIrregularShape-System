@@ -1,4 +1,4 @@
-"""Cancellable JPG catalog scan and deterministic same-pattern size ranking."""
+"""Cancellable JPG catalog scan and size ranking within a ratio tolerance."""
 from dataclasses import dataclass
 import math
 import os
@@ -7,6 +7,9 @@ from collections import OrderedDict
 from threading import RLock
 from shape_crop.services.filename_parser import parse_filename
 from shape_crop.core.renderer import RenderCancelled
+
+
+MAX_RATIO_ERROR = math.log(1.05)
 
 
 @dataclass(frozen=True)
@@ -214,5 +217,11 @@ def match_material(target, directory, cancelled=None, progress=None, *, verify=T
         candidates.append((ratio_error, size_error, path, parsed))
     if not candidates:
         raise ValueError(f'图库中未找到同材质、同花型“{target.pattern}”的矩形 JPG；可在高级选项指定素材')
-    ratio, _, path, parsed = min(candidates, key=lambda item: (item[0], item[1], item[2].casefold()))
+    def rank(item):
+        ratio, size, path, _ = item
+        if ratio <= MAX_RATIO_ERROR:
+            return (0, size, ratio, path.casefold(), path)
+        return (1, ratio, size, path.casefold(), path)
+
+    ratio, _, path, parsed = min(candidates, key=rank)
     return Match(path, parsed, ratio)

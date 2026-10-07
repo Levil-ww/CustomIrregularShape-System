@@ -24,7 +24,7 @@ def test_filename_variants(name):
     assert parse_filename(name).height_cm == 80
 
 
-def test_catalog_prioritizes_pattern_material_then_ratio_then_size(tmp_path):
+def test_catalog_filters_pattern_material_and_prefers_exact_size(tmp_path):
     names = ['双面格-定制-定制尺寸-花幔;80X140CM.jpg',
              '双面格-定制-定制尺寸-花幔;40X70CM.jpg',
              '双面格-定制-定制尺寸-花幔;80X150CM.jpg',
