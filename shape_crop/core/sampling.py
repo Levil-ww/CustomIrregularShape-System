@@ -14,9 +14,30 @@ def sample(image, x, y, wrap_x=False, wrap_y=False):
     # Subtracting int32 indices promotes float32 coordinates to float64 in NumPy.
     # Keep interpolation at float32 to halve temporary bandwidth and memory.
     fx, fy = (x - x0.astype(np.float32))[..., None], (y - y0.astype(np.float32))[..., None]
-    a = image[y0, x0].astype(np.float32) * (1 - fx) + image[y0, x1] * fx
-    b = image[y1, x0].astype(np.float32) * (1 - fx) + image[y1, x1] * fx
-    return np.clip(a * (1 - fy) + b * fy, 0, 255).astype(np.uint8)
+    if x.ndim == y.ndim == 2 and x.shape[0] == 1 and y.shape[1] == 1:
+        # Uniform artwork mappings use a Cartesian grid. When enlarging a
+        # source, many output rows share the same two source rows: interpolate
+        # each unique source row horizontally once, then interpolate vertically.
+        # Preserve the original operation order for identical uint8 results.
+        rows, inverse = np.unique(np.concatenate((y0[:, 0], y1[:, 0])), return_inverse=True)
+        if len(rows) < 2 * y.shape[0]:
+            horizontal = (image[rows[:, None], x0].astype(np.float32) * (1 - fx)
+                          + image[rows[:, None], x1] * fx)
+            a = horizontal[inverse[:y.shape[0]]]
+            b = horizontal[inverse[y.shape[0]:]]
+        else:
+            a = image[y0, x0].astype(np.float32) * (1 - fx) + image[y0, x1] * fx
+            b = image[y1, x0].astype(np.float32) * (1 - fx) + image[y1, x1] * fx
+    else:
+        a = image[y0, x0].astype(np.float32) * (1 - fx) + image[y0, x1] * fx
+        b = image[y1, x0].astype(np.float32) * (1 - fx) + image[y1, x1] * fx
+    # These buffers are private to this call. Reuse them for the vertical
+    # interpolation instead of allocating more full-size float RGB arrays.
+    np.multiply(a, 1 - fy, out=a)
+    np.multiply(b, fy, out=b)
+    np.add(a, b, out=a)
+    np.clip(a, 0, 255, out=a)
+    return a.astype(np.uint8)
 
 
 def sample_perimeter_strip(image, arc_length, depth_px, perimeter_cm, source_scale_cm, origin=0.):
