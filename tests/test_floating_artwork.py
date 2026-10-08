@@ -25,6 +25,33 @@ def test_coloured_frame_is_not_a_blank_moat(factor):
     assert detect_floating_artwork(image) is None, '米色英文框与咖色外框不能当作绿色背景留白'
 
 
+@pytest.mark.parametrize('factor', [1, 4])
+def test_connected_full_span_pattern_with_central_panel_keeps_source_scale(factor):
+    image = Image.new('RGB', (600, 360), (255, 244, 221))
+    draw = ImageDraw.Draw(image)
+    # Connected full-span floral strokes surround a textured central panel.
+    # The large component must not be discarded as a frame to create a gallery.
+    for x in range(0, 600, 32):
+        draw.line((x, 0, x, 359), fill='black', width=2)
+    for y in range(0, 360, 32):
+        draw.line((0, y, 599, y), fill='black', width=2)
+    draw.rectangle((90, 70, 509, 289), fill=(255, 244, 221))
+    panel = np.random.default_rng(19).integers(165, 215, (200, 400, 3), dtype=np.uint8)
+    image.paste(Image.fromarray(panel), (100, 80))
+    if factor != 1:
+        image = image.resize((600 * factor, 360 * factor), Image.Resampling.NEAREST)
+    assert detect_floating_artwork(image) is None, '外围相连花纹不能被忽略为画框'
+    layout = analyze_layout(image)
+    assert layout.floating_artwork is None, '外围满幅花纹不能当成中央画框的留白'
+    shape = create_shape(DesignSpec(diameter_cm=139, height_cm=87,
+                         shape_mode='arc', straight_cm=108, border=BorderSpec(0, 0, 0)))
+    scale = ContentMapping.source_scale(layout, 139, 87)
+    border = max(layout.border_depth_px * scale, ContentMapping.required_border(layout, 139, 87))
+    mapping = ContentMapping.create(layout, 139, 87, border, shape=shape)
+    assert mapping.scale_cm == scale, '中央纹理面板与外围花纹必须按原图等比裁剪'
+    assert mapping.background is None, '圆弧两侧不能补出纯色竖带'
+
+
 @pytest.mark.parametrize('outlined', [False, True])
 @pytest.mark.parametrize('factor', [1, 4])
 def test_floating_gallery_fits_shape_with_original_minimum_clearance(outlined, factor):
