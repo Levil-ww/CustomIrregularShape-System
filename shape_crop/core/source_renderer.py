@@ -44,6 +44,7 @@ def render_source(design, material, inner_material=None, max_side=None, progress
         ring_depth = source_depth * scale
         if plain_band and source_depth >= plain_band[1]:
             ring_depth += extra_cm
+    ring_depth = min(ring_depth, shape.half_height - 1e-6) if border_cm else 0.0
     ring = shape.inset(ring_depth) if border_cm else shape
     strip_width = layout.strip.shape[1]
     origin = (strip_width - ring.chord / scale) / 2
@@ -131,6 +132,7 @@ def render_source(design, material, inner_material=None, max_side=None, progress
 def _complete_corner_ticks(strip, shape, ring, scale, inner_depth, colours,
                            x, y, source_depth, start, end):
     """Fit whole ticks on each straight/arc segment without radial clipping."""
+    inner_depth = min(inner_depth, shape.half_height - 1e-6)
     inner = shape.inset(inner_depth)
     period = strip.shape[1]
     # Begin/end the repeated cell in actual source background, never midway

@@ -28,7 +28,7 @@ class CircularBand:
 
     @property
     def angle(self):
-        return math.asin(self.height / self.diameter)
+        return math.asin(min(1., self.height / self.diameter))
 
     @property
     def perimeter(self):

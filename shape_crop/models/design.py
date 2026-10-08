@@ -68,8 +68,6 @@ class DesignSpec:
     straight_cm: float = 0.0
 
     def validate(self):
-        from shape_crop.core.geometry import create_shape
-        shape = create_shape(self)
         values = (self.diameter_cm, self.height_cm, self.border.margin_cm,
                   self.border.width_cm, self.border.line_cm, self.inner_diameter_cm,
                   self.inner_border_cm)
@@ -84,7 +82,6 @@ class DesignSpec:
             raise ValueError('边框和内圆尺寸不能为负数')
         if self.border.inset_cm >= self.height_cm / 2:
             raise ValueError('外边框过宽，已占满保留高度')
-        shape.inset(self.border.inset_cm)
         if self.border.line_cm > self.border.width_cm:
             raise ValueError('描边宽度不能超过装饰花边宽度')
         if self.inner_diameter_cm:

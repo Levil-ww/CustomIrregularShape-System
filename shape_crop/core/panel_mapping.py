@@ -11,12 +11,15 @@ def adapt_panel(layout, mapping, shape, border_cm, x, y):
     target_usable = shape.height - 2 * border_cm
     gap_fraction = ((top - source_top) + (source_bottom - bottom)) / 2 / usable
     inset = border_cm + gap_fraction * target_usable
+    max_inset = shape.half_height - 1e-6
+    if inset >= max_inset:
+        inset = max(border_cm, 0.0)
     inner = shape.inset(inset)
     # Move original pixels, including the fade and fine line, together. Undoing
     # a source fade amplifies JPEG noise and cannot recover ink under the line.
     centre_x, centre_y = (left + right) / 2, (top + bottom) / 2
     source_half_h = (bottom - top) / 2
-    target_half_h = inner.half_height
+    target_half_h = max(inner.half_height, 1e-6)
     ay = np.abs(y)
     source_y = np.where(ay <= target_half_h, ay * source_half_h / target_half_h,
         source_half_h + (ay - target_half_h) *
