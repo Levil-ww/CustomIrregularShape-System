@@ -10,6 +10,20 @@ from shape_crop.services.floating_artwork import detect_floating_artwork
 
 
 @pytest.mark.parametrize('factor', [1, 4])
+@pytest.mark.parametrize('line_width', [2, 3])
+def test_narrow_gallery_clearance_does_not_count_thin_frame_as_artwork(factor, line_width):
+    image = Image.new('RGB', (600, 360), (247, 240, 232))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((12, 12, 587, 347), outline=(170, 130, 70), width=line_width)
+    for box, colour in [((32, 100, 200, 260), (50, 65, 35)),
+                        ((240, 100, 360, 260), (170, 130, 70)),
+                        ((400, 100, 568, 260), (25, 24, 24))]:
+        image.paste(colour, box)
+    image = image.resize((600 * factor, 360 * factor), Image.Resampling.NEAREST)
+    assert detect_floating_artwork(image) is not None, '窄留白中的细外框不能计作图案导致尺寸识别不一致'
+
+
+@pytest.mark.parametrize('factor', [1, 4])
 def test_coloured_frame_is_not_a_blank_moat(factor):
     # The large connected frame is ignored as an artwork component, but its
     # contrasting colour must not count as whitespace around the small motifs.
@@ -54,7 +68,8 @@ def test_connected_full_span_pattern_with_central_panel_keeps_source_scale(facto
 
 @pytest.mark.parametrize('outlined', [False, True])
 @pytest.mark.parametrize('factor', [1, 4])
-def test_floating_gallery_fits_shape_with_original_minimum_clearance(outlined, factor):
+@pytest.mark.parametrize('width,height,straight', [(131, 81, 103), (139, 87, 108), (105, 66.5, 82)])
+def test_floating_gallery_fits_shape_with_original_minimum_clearance(outlined, factor, width, height, straight):
     image = Image.new('RGB', (650, 400), (247, 240, 232))
     if outlined:
         image.paste((170, 130, 70), (16, 16, 634, 384))
@@ -67,12 +82,12 @@ def test_floating_gallery_fits_shape_with_original_minimum_clearance(outlined, f
         image = image.resize((650 * factor, 400 * factor), Image.Resampling.NEAREST)
     layout = analyze_layout(image)
     assert layout.floating_artwork is not None, '独立画框应自动归为留白图案类'
-    design = DesignSpec(diameter_cm=131, height_cm=81, shape_mode='arc', straight_cm=103,
+    design = DesignSpec(diameter_cm=width, height_cm=height, shape_mode='arc', straight_cm=straight,
                         border=BorderSpec(0, 0, 0))
     shape = create_shape(design)
-    native = ContentMapping.source_scale(layout, 131, 81)
-    border = max(layout.border_depth_px * native, ContentMapping.required_border(layout, 131, 81))
-    mapping = ContentMapping.create(layout, 131, 81, border, shape=shape)
+    native = ContentMapping.source_scale(layout, width, height)
+    border = max(layout.border_depth_px * native, ContentMapping.required_border(layout, width, height))
+    mapping = ContentMapping.create(layout, width, height, border, shape=shape)
     bounds, frame, _ = layout.floating_artwork
     left, top, right, bottom = bounds
     gap = min(left - frame[0], top - frame[1], frame[2] - right, frame[3] - bottom) * native

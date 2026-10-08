@@ -79,8 +79,25 @@ def detect_floating_artwork(image):
     # Allow a thin frame outline and antialiasing, as in genuine gallery art.
     a, b, c, d = bounds
     left, top, right, bottom = frame
-    moat = (foreground[top:b, a:c], foreground[d:bottom, a:c],
-            foreground[b:d, left:a], foreground[b:d, c:right])
+    # Exclude only the measured thin, continuous frame stroke from the blank
+    # test. A fixed occupancy allowance counts the same line differently when
+    # the source's side clearance changes. Thick contrasting bands still fail.
+    limit = max(3, round(min(width, height) * .015))
+
+    def stroke_end(rows):
+        count = 0
+        for row in rows[:limit + 1]:
+            if np.mean(row) < .70:
+                return count
+            count += 1
+        return 0
+
+    clean_top = top + stroke_end(foreground[top:b, a:c])
+    clean_bottom = bottom - stroke_end(foreground[d:bottom, a:c][::-1])
+    clean_left = left + stroke_end(foreground[b:d, left:a].T)
+    clean_right = right - stroke_end(foreground[b:d, c:right].T[::-1])
+    moat = (foreground[clean_top:b, a:c], foreground[d:clean_bottom, a:c],
+            foreground[b:d, clean_left:a], foreground[b:d, c:clean_right])
     if any(not strip.size or np.mean(strip) > .10 for strip in moat):
         return None
     ratios = (image.width / width, image.height / height) * 2
