@@ -155,6 +155,30 @@ def _sentence_layer(strip):
     return np.roll(layer, offset, axis=1), float(anchor)
 
 
+def _straight_outline_rows(region):
+    """Remove rectangle corner fragments from otherwise flat dark separators."""
+    height, width = region.shape[:2]
+    if width < 20:
+        return region
+    middle = region[:, width // 5:width * 4 // 5].astype(np.float32)
+    colours = np.median(middle, axis=1)
+    flat = np.mean(np.max(np.abs(middle - colours[:, None]), axis=2) <= 10, axis=1) >= .99
+    dark = flat & (np.max(colours, axis=1) < 80)
+    selected = dark.copy()
+    # Include antialiased rows beside the solid dark stroke, but no distant
+    # sparse letters or decorative rows with variation across the middle.
+    for shift in (1, 2):
+        selected[shift:] |= dark[:-shift]
+        selected[:-shift] |= dark[shift:]
+    selected &= flat
+    selected &= np.mean(np.max(np.abs(region.astype(np.float32) - colours[:, None]), axis=2) <= 18, axis=1) >= .90
+    if not np.any(selected):
+        return region
+    result = region.copy()
+    result[selected] = colours[selected, None].astype(np.uint8)
+    return result
+
+
 def analyze_layout(image):
     if image.height > image.width:
         image = image.transpose(Image.Transpose.ROTATE_90)
@@ -225,7 +249,7 @@ def analyze_layout(image):
         raise ValueError('原素材内容区识别失败，四边边框已占满图片')
     # Extract only the safe horizontal span. Side borders need not equal the top depth.
     safe_left, safe_right = min(left + 1, right - 1), max(left + 1, right - 1)
-    region = pixels[:max(1, depth), safe_left:safe_right]
+    region = _straight_outline_rows(pixels[:max(1, depth), safe_left:safe_right])
     strip, period = extract_period(region)
     if not period:
         strip, period = extract_dark_period(region)
