@@ -194,6 +194,14 @@ def _straight_outline_rows(region):
     for shift in (1, 2):
         selected[shift:] |= dark[:-shift]
         selected[:-shift] |= dark[shift:]
+    # Rounded rectangle ends also leave diagonal fragments in the light gap
+    # between parallel strokes. Complete that entire gap only when every row
+    # has an undecorated middle; text and repeating ornaments break this run.
+    undecorated = np.max(np.abs(middle - colours[:, None]), axis=(1, 2)) <= 18
+    strokes = np.flatnonzero(dark)
+    for start, end in zip(strokes[:-1], strokes[1:]):
+        if end > start + 1 and np.all(undecorated[start:end + 1]):
+            selected[start:end + 1] = True
     selected &= flat
     selected &= np.mean(np.max(np.abs(region.astype(np.float32) - colours[:, None]), axis=2) <= 18, axis=1) >= .90
     if not np.any(selected):

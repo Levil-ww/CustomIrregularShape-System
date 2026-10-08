@@ -40,3 +40,27 @@ def test_black_separator_stays_continuous_along_both_side_arcs(mode):
     for sign in (-1, 1):
         cols = np.rint((sign * xs / 60 + .5) * pixels.shape[1] - .5).astype(int)
         assert np.all(np.max(pixels[rows, cols, :3], axis=1) < 90), '原矩形圆角造成目标侧弧细线局部偏离'
+
+
+def wide_outline_source():
+    image = Image.new('RGB', (600, 360), (120, 76, 43))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((16, 16, 583, 343), radius=24, fill=(254, 242, 226))
+    draw.rounded_rectangle((24, 24, 575, 335), radius=32, outline='black', width=2)
+    draw.rounded_rectangle((38, 38, 561, 321), radius=24, outline='black', width=2)
+    pixels = np.asarray(image).copy()
+    pixels[40:320, 40:560] = np.random.default_rng(42).integers(100, 220, (280, 520, 3), dtype=np.uint8)
+    return Image.fromarray(pixels)
+
+
+def test_space_between_outline_strokes_has_no_source_corner_fragments():
+    layout = analyze_layout(wide_outline_source())
+    gap = layout.strip[26:38]
+    assert np.all(gap == (254, 242, 226)), 'Triangle fragments remain between outline strokes'
+
+
+def test_sparse_decoration_between_strokes_is_preserved():
+    image = wide_outline_source()
+    ImageDraw.Draw(image).line((300, 29, 300, 33), fill='black')
+    layout = analyze_layout(image)
+    assert np.any(np.max(layout.strip[29:34], axis=2) < 80), 'Sparse decoration was removed with corner fragments'
