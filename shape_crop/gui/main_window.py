@@ -180,7 +180,7 @@ class MainWindow(QMainWindow):
         self.straight_value = QDoubleSpinBox()
         for field in (self.width_value, self.height_value, self.straight_value):
             field.setRange(0, 1000)
-            field.setDecimals(3)
+            field.setDecimals(2)
             field.setSpecialValueText('待填写')
             field.valueChanged.connect(self.update_dimensions)
         dimension_form.addRow('W 最大宽度 cm', self.width_value)
@@ -458,7 +458,7 @@ class MainWindow(QMainWindow):
             if (abs(self.width_value.value() - parsed.width_cm) > .001 or
                     abs(self.height_value.value() - parsed.height_cm) > .001):
                 conflict = '\n注意：当前尺寸与文件名不同，按当前填写尺寸生成，输出名称保持原名。'
-            self.dimension_label.setText(f'花型：{parsed.pattern}\n实际{title} {shape.diameter:g}cm · 总高 {shape.height:g}cm\n直边 {shape.chord:.3f}cm' + conflict)
+            self.dimension_label.setText(f'花型：{parsed.pattern}\n实际{title} {shape.diameter:g}cm · 总高 {shape.height:g}cm\n直边 {shape.chord:.2f}cm' + conflict)
             self.outline.set_shape(shape)
             self.output_label.setText('输出：' + parsed.stem + ('.jpg' if self.format.currentIndex() == 0 else '.png'))
         except ValueError as error:
