@@ -192,14 +192,18 @@ def test_target_history_limit_and_clear_preserve_current_order(isolated_desktop_
     window = main_window.MainWindow()
     errors = []
     window.show_error = errors.append
+    assert window.target_history.count() == 15
+    assert window.target_history.maxVisibleItems() == 15
+    assert isolated_desktop_settings.value('target_filename_history', type=list) == names[:15]
     window.target.setText('新花型;86x138cm')
     window.override.setText('unused.jpg')
     window.start_task(True)
     assert not errors
     window.task_finished()
-    assert window.target_history.count() == 50
+    assert window.target_history.count() == 15
     assert window.target_history.itemText(0) == '新花型;86x138cm'
-    assert window.target_history.findText(names[-1]) == -1
+    assert window.target_history.itemText(14) == names[13]
+    assert window.target_history.findText(names[14]) == -1
     window.shape_mode.setCurrentIndex(1)
     window.straight_value.setValue(108)
     window.sketch_path = 'sketch.png'

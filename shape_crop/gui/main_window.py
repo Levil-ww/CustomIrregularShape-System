@@ -21,7 +21,7 @@ from shape_crop.gui.theme import apply_theme
 from shape_crop.services.catalog_session import CatalogSession
 
 
-TARGET_HISTORY_LIMIT = 50
+TARGET_HISTORY_LIMIT = 15
 
 
 class MainWindow(QMainWindow):
@@ -155,13 +155,17 @@ class MainWindow(QMainWindow):
         self.target_history.setInsertPolicy(QComboBox.NoInsert)
         self.target_history.setMinimumWidth(0)
         self.target_history.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.target_history.setMaxVisibleItems(10)
-        self.target_history.addItems(self.settings.value('target_filename_history', [], type=list)[:TARGET_HISTORY_LIMIT])
+        self.target_history.setMaxVisibleItems(TARGET_HISTORY_LIMIT)
+        saved_history = self.settings.value('target_filename_history', [], type=list)
+        self.target_history.addItems(saved_history[:TARGET_HISTORY_LIMIT])
+        if len(saved_history) > TARGET_HISTORY_LIMIT:
+            self.settings.setValue('target_filename_history', saved_history[:TARGET_HISTORY_LIMIT])
+            self.settings.sync()
         self.target_history.setCurrentIndex(-1)
         self.target_history.completer().setCompletionMode(QCompleter.PopupCompletion)
         self.target = self.target_history.lineEdit()
         self.target.setPlaceholderText('双面格-定制-裁剪有图-花幔;80X140cm裁剪有图')
-        self.target_history.setToolTip('输入新文件名或选择历史记录；启动预览或生成成品时保存，最多保留最近 50 条')
+        self.target_history.setToolTip('输入新文件名或下拉查看历史记录；启动预览或生成成品时保存，最多保留最近 15 条')
         target_row = QHBoxLayout()
         target_row.addWidget(self.target_history, 1)
         self.clear_target_history_button = QPushButton('清空历史')
