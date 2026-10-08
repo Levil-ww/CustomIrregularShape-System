@@ -4,6 +4,7 @@ import numpy as np
 from PIL import Image
 from shape_crop.services.texture_period import extract_period, extract_dark_period
 from shape_crop.services.floating_artwork import detect_floating_artwork
+from shape_crop.services.inset_panel import detect_inset_panel
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class SourceLayout:
     strip_is_sentence: bool = False
     sentence_layers: tuple = ()
     floating_artwork: object = None
+    inset_panel: object = None
 
 
 def _touching_ornament_end(pixels, row, left, right, run):
@@ -254,5 +256,8 @@ def analyze_layout(image):
         message += '；满幅装饰带连续环绕'
     if floating is not None:
         message += '；独立图案留白类：完整图案组等比适配，保留原素材最小留白距离'
+    panel = detect_inset_panel(image)
+    if panel is not None:
+        message += '；中央浅色框随轮廓适配，保留原间距比例'
     return SourceLayout(pixels, strip, depth, width, height, message, content,
-                        (left, top, right, bottom), period, sentence, layers, floating)
+                        (left, top, right, bottom), period, sentence, layers, floating, panel)
