@@ -31,8 +31,12 @@ class ContentMapping:
     def create(cls, layout, diameter_cm, height_cm, border_cm, shape=None):
         scale = cls.source_scale(layout, diameter_cm, height_cm)
         left, top, right, bottom = layout.content_box_px
-        if layout.floating_artwork is not None and shape is not None:
-            bounds, frame, background = layout.floating_artwork
+        if (layout.floating_artwork is not None or layout.framed_artwork is not None) and shape is not None:
+            if layout.framed_artwork is not None:
+                artwork = layout.framed_artwork
+                bounds, frame, background = artwork.box, artwork.frame, None
+            else:
+                bounds, frame, background = layout.floating_artwork
             a, b, c, d = bounds
             clearance = min(a - frame[0], b - frame[1], frame[2] - c, frame[3] - d) * scale
             xs = np.array([a, a, c, c]) - layout.width_px / 2

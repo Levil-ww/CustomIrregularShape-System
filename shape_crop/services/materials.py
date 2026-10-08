@@ -76,6 +76,8 @@ def prepare(material, preview=False):
     arrays = [result.content, result.strip]
     if result.source_layout:
         arrays.extend((result.source_layout.image, result.source_layout.content))
+        if result.source_layout.framed_artwork is not None:
+            arrays.append(result.source_layout.framed_artwork.tile)
         arrays.extend(entry[0] for entry in result.source_layout.sentence_layers if entry is not None)
     arrays = {id(array): array for array in arrays}.values()
     size = 0

@@ -4,6 +4,7 @@ from PIL import Image
 from shape_crop.core.geometry import create_shape, inset_boundary_fraction
 from shape_crop.core.sampling import sample_perimeter_strip, sample_sentence_strip, uniform_strip_band, sample
 from shape_crop.core.content_mapping import ContentMapping
+from shape_crop.core.framed_artwork_mapping import sample_framed_artwork
 from shape_crop.core.panel_mapping import adapt_panel
 from shape_crop.core.renderer import RenderCancelled, blend
 
@@ -56,7 +57,9 @@ def render_source(design, material, inner_material=None, max_side=None, progress
         end = min(height, start + block_rows)
         y = ((np.arange(start, end, dtype=np.float32) + .5) / height - .5)[:, None] * design.height_cm
         depth = shape.depth(x, y)
-        if layout.inset_panel is not None:
+        if layout.framed_artwork is not None:
+            rgb = sample_framed_artwork(layout, mapping, scale, x, y, px_cm)
+        elif layout.inset_panel is not None:
             rgb = adapt_panel(layout, mapping, shape, border_cm, x, y)
         else:
             rgb = mapping.sample(layout, x, y)

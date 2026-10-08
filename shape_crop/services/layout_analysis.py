@@ -5,6 +5,7 @@ from PIL import Image
 from shape_crop.services.texture_period import extract_period, extract_dark_period
 from shape_crop.services.floating_artwork import detect_floating_artwork
 from shape_crop.services.inset_panel import detect_inset_panel
+from shape_crop.services.framed_artwork import detect_framed_artwork
 
 
 @dataclass(frozen=True)
@@ -23,10 +24,13 @@ class SourceLayout:
     floating_artwork: object = None
     inset_panel: object = None
     corner_gaps: object = None
+    framed_artwork: object = None
 
     @property
     def category(self):
         """Classify structure independently of pattern names and target sizes."""
+        if self.framed_artwork is not None:
+            return '装饰背景独立画框类'
         if self.inset_panel is not None:
             return '中央内框类'
         if self.floating_artwork is not None:
@@ -283,6 +287,9 @@ def analyze_layout(image):
     left = edge(pixels.transpose(1, 0, 2), detected.transpose(1, 0, 2))
     right = width - edge(pixels[:, ::-1].transpose(1, 0, 2), detected[:, ::-1].transpose(1, 0, 2))
     top = depth
+    framed = detect_framed_artwork(image, (left, top, right, bottom))
+    if framed is not None:
+        left, top, right, bottom = (round(value) for value in framed.frame)
     panel = detect_inset_panel(image)
     floating = detect_floating_artwork(probe) if panel is None else None
     if floating is not None and depth:
@@ -350,5 +357,7 @@ def analyze_layout(image):
         message += '；保留原条纹四角空隙'
     if panel is not None:
         message += '；中央浅色框随轮廓适配，保留原间距比例'
+    if framed is not None:
+        message += '；中央画框等比适配，保留原装饰背景及最小间距'
     return SourceLayout(pixels, strip, depth, width, height, message, content,
-                        (left, top, right, bottom), period, sentence, layers, floating, panel, gaps)
+                        (left, top, right, bottom), period, sentence, layers, floating, panel, gaps, framed)
