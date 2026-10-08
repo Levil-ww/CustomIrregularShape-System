@@ -1,11 +1,28 @@
 """Gallery compositions share automatic recognition and preserved frame clearance."""
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 from shape_crop.services.layout_analysis import analyze_layout
 from shape_crop.core.content_mapping import ContentMapping
 from shape_crop.core.geometry import create_shape
 from shape_crop.models.design import DesignSpec, BorderSpec
+from shape_crop.services.floating_artwork import detect_floating_artwork
+
+
+@pytest.mark.parametrize('factor', [1, 4])
+def test_coloured_frame_is_not_a_blank_moat(factor):
+    # The large connected frame is ignored as an artwork component, but its
+    # contrasting colour must not count as whitespace around the small motifs.
+    image = Image.new('RGB', (800, 480), (106, 104, 63))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 799, 479), outline=(92, 63, 51), width=16)
+    draw.rectangle((16, 16, 783, 463), outline=(239, 228, 209), width=28)
+    for x in range(70, 740, 60):
+        for y in range(70, 420, 60):
+            draw.ellipse((x, y, x + 20, y + 20), outline='black', width=2)
+    if factor != 1:
+        image = image.resize((800 * factor, 480 * factor), Image.Resampling.NEAREST)
+    assert detect_floating_artwork(image) is None, '米色英文框与咖色外框不能当作绿色背景留白'
 
 
 @pytest.mark.parametrize('outlined', [False, True])

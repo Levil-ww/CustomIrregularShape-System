@@ -73,6 +73,16 @@ def detect_floating_artwork(image):
     # from edge-to-edge tiles, horizontal floral bands and decorative frames.
     if min(gaps) < max(3, min(width, height) * .05):
         return None
+    # Component bounds alone can mistake a contrasting text/frame band for
+    # empty space: large connected outlines are excluded from artwork above.
+    # Require the actual four clearance strips to share the content background.
+    # Allow a thin frame outline and antialiasing, as in genuine gallery art.
+    a, b, c, d = bounds
+    left, top, right, bottom = frame
+    moat = (foreground[top:b, a:c], foreground[d:bottom, a:c],
+            foreground[b:d, left:a], foreground[b:d, c:right])
+    if any(not strip.size or np.mean(strip) > .10 for strip in moat):
+        return None
     ratios = (image.width / width, image.height / height) * 2
     bounds = tuple(value * ratio for value, ratio in zip(bounds, ratios))
     frame = tuple(value * ratio for value, ratio in zip(frame, ratios))
