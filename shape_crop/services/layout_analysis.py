@@ -40,7 +40,9 @@ def _blank_content_start(uniform, colours, depth, height, run):
     if depth <= 1:
         return depth
     end = depth
-    while end > max(0, depth - 4 * run):
+    # The first content transition may be a central motif after a long blank
+    # moat. Search back through that moat, not just a few rows near the motif.
+    while end > 0:
         if not uniform[end - 1]:
             end -= 1
             continue
@@ -140,8 +142,12 @@ def _sentence_layer(strip):
     if columns[-1] - columns[0] + 1 >= strip.shape[1] * .8:
         return None
     offset = round((strip.shape[1] - 1 - columns[0] - columns[-1]) / 2)
-    alpha = np.zeros(strip.shape[:2], dtype=np.uint8)
-    alpha[rows] = (np.max(np.abs(selected - background[:, None, :]), axis=2) > 8) * 255
+    # Salient rows classify the decoration, but cannot serve as its mask:
+    # sparse crossbars and descenders have lower row variance than the main
+    # glyph bodies. Preserve ink on every row against that row's flat colour.
+    all_pixels = strip.astype(np.float32)
+    row_background = np.median(all_pixels, axis=1)
+    alpha = (np.max(np.abs(all_pixels - row_background[:, None, :]), axis=2) > 8).astype(np.uint8) * 255
     layer = np.concatenate((strip, alpha[..., None]), axis=2)
     anchor = (columns[0] + columns[-1]) / 2 / max(1, strip.shape[1] - 1)
     return np.roll(layer, offset, axis=1), float(anchor)
@@ -194,8 +200,12 @@ def analyze_layout(image):
         probe_depth = max(1, round(depth * probe.height / height))
         probe_left = max(0, round(left * probe.width / width))
         probe_right = max(probe_left + 1, round(right * probe.width / width))
-        _, frame_period = extract_period(detected[:probe_depth, probe_left:probe_right])
-        if frame_period and frame_period >= 4:
+        frame_region = detected[:probe_depth, probe_left:probe_right]
+        _, frame_period = extract_period(frame_region)
+        # Small, disconnected letters fall below the gallery component area
+        # threshold. A detected sentence frame must retain precedence, or the
+        # gallery path leaves its ink in the content to be clipped by the arc.
+        if (frame_period and frame_period >= 4) or _sentence_layer(frame_region) is not None:
             floating = None
     if floating is not None:
         bounds, frame, background = floating
