@@ -38,4 +38,23 @@ def adapt_panel(layout, mapping, shape, border_cm, x, y):
         source_half_w + (ax - target_half_w) *
         ((source_right - source_left) / 2 - source_half_w) / (outer_x - target_half_w))
     u = centre_x + np.sign(x) * source_x
-    return sample(layout.content, u - mapping.left, v - mapping.top)
+    result = sample(layout.content, u - mapping.left, v - mapping.top)
+    if panel.artwork is not None:
+        bounds, background = panel.artwork
+        a, b, c, d = bounds
+        ink_x, ink_y = (a + c) / 2, (b + d) / 2
+        # The quiet opaque panel and its original ink are separate layers.
+        # Fit the entire ink group uniformly; no row-dependent shear reaches
+        # letters, even though the panel's thin outline follows the side arcs.
+        target_y = (ink_y - centre_y) / source_half_h * inner.half_height
+        target_x = (ink_x - centre_x) / source_half_w * inner.chord / 2
+        ink_scale = min(mapping.scale_cm, inner.chord / max(1, c - a + 4),
+                        inner.height / max(1, d - b + 4))
+        ink_u = ink_x + (x - target_x) / ink_scale
+        ink_v = ink_y + (y - target_y) / ink_scale
+        inside = inner.depth(x, y) > 3 * mapping.scale_cm
+        result = np.where(inside[..., None], background, result).astype(np.uint8)
+        selected = inside & (ink_u >= a) & (ink_u <= c) & (ink_v >= b) & (ink_v <= d)
+        original = sample(layout.image, ink_u, ink_v)
+        result = np.where(selected[..., None], original, result)
+    return result

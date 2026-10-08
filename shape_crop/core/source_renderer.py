@@ -2,7 +2,7 @@
 import numpy as np
 from PIL import Image
 from shape_crop.core.geometry import create_shape, inset_boundary_fraction
-from shape_crop.core.sampling import sample_perimeter_strip, sample_sentence_strip, uniform_strip_band
+from shape_crop.core.sampling import sample_perimeter_strip, sample_sentence_strip, uniform_strip_band, sample
 from shape_crop.core.content_mapping import ContentMapping
 from shape_crop.core.panel_mapping import adapt_panel
 from shape_crop.core.renderer import RenderCancelled, blend
@@ -86,6 +86,12 @@ def render_source(design, material, inner_material=None, max_side=None, progress
             else:
                 stripe = sample_perimeter_strip(layout.strip, s, sample_depth,
                                                  ring.perimeter, scale, origin)
+            if layout.corner_gaps is not None:
+                gap_start, gap_end, colours = layout.corner_gaps
+                band = (sample_depth >= gap_start - .5) & (sample_depth < gap_end - .5)
+                stripe[band] = _complete_corner_ticks(layout.strip, shape, ring, scale,
+                    gap_end * scale + extra_cm, colours, x[0, columns[band]],
+                    y[rows[band], 0], sample_depth[band], gap_start, gap_end)
             border_rgb = rgb[rows, columns]
             blend(border_rgb, stripe, cov(border_cm - border_depth))
             rgb[rows, columns] = border_rgb
@@ -117,3 +123,31 @@ def render_source(design, material, inner_material=None, max_side=None, progress
         if progress:
             progress(round(end / height * 100))
     return output
+
+
+def _complete_corner_ticks(strip, shape, ring, scale, inner_depth, colours,
+                           x, y, source_depth, start, end):
+    """Fit whole ticks on each straight/arc segment without radial clipping."""
+    inner = shape.inset(inner_depth)
+    period = strip.shape[1]
+    # Begin/end the repeated cell in actual source background, never midway
+    # through its white stroke. Keep all original colour/antialias pixels.
+    background = np.asarray(colours[0])
+    ink = np.mean(np.max(np.abs(strip[start:end].astype(np.float32) - background), axis=2), axis=0)
+    shifted = np.roll(strip, -int(np.argmin(ink)), axis=1)
+    centre = getattr(shape, 'center', 0.)
+    theta = np.arctan2(y, np.abs(x) - centre)
+    radial = shape.radius - np.hypot(np.abs(x) - centre, y)
+    on_line = shape.half_height - np.abs(y) <= radial
+    # The innermost band boundary limits every row. With one x transform on
+    # straights and one angular transform on arcs, each tick has full length.
+    straight_count = max(0, int(np.floor(inner.chord / (period * scale))))
+    arc_count = max(0, int(np.floor(2 * ring.radius * inner.angle / (period * scale))))
+    straight_u = x / scale + straight_count * period / 2
+    arc_u = theta * ring.radius / scale + arc_count * period / 2
+    u = np.where(on_line, straight_u, arc_u)
+    limit = np.where(on_line, straight_count, arc_count) * period
+    valid = (u >= 0) & (u < limit)
+    ticks = sample(shifted, u, source_depth, wrap_x=True)
+    corner = np.where(x >= 0, np.where(y >= 0, 2, 1), np.where(y >= 0, 3, 0))
+    return np.where(valid[:, None], ticks, np.asarray(colours, dtype=np.uint8)[corner])

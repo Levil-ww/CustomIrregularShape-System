@@ -16,7 +16,7 @@ def generate(design, preview=False, output=None, progress=None, cancelled=None, 
     outer = prepare(design.material, preview)
     if diagnostics and outer and outer.source_layout:
         layout = outer.source_layout
-        report = layout.report
+        report = f'布局分类：{layout.category}；{layout.report}'
         if layout.floating_artwork is not None:
             from shape_crop.core.content_mapping import ContentMapping
             from shape_crop.core.geometry import create_shape

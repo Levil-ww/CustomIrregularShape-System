@@ -22,6 +22,24 @@ class SourceLayout:
     sentence_layers: tuple = ()
     floating_artwork: object = None
     inset_panel: object = None
+    corner_gaps: object = None
+
+    @property
+    def category(self):
+        """Classify structure independently of pattern names and target sizes."""
+        if self.inset_panel is not None:
+            return '中央内框类'
+        if self.floating_artwork is not None:
+            return '独立图案留白类'
+        if self.strip_is_sentence:
+            return '局部文字边框类'
+        if self.strip_period_px:
+            return '周期装饰边框类'
+        if not self.border_depth_px:
+            return '原图填充类'
+        if np.any(np.std(self.strip.astype(np.float32), axis=1) > 2):
+            return '连续装饰边框类'
+        return '纯色边框类'
 
 
 def _touching_ornament_end(pixels, row, left, right, run):
@@ -93,7 +111,13 @@ def boundary_depth(pixels):
                 # Round beads can span about four recognition runs, including
                 # their outline. Keep the compact-repeat guard so large tiled
                 # flowers still stop the scan at the content boundary.
-                if period and band_depth <= 4 * run and period <= max(4 * run, 2 * band_depth):
+                band = pixels[row:end, columns[0]:columns[-1] + 1].astype(np.float32)
+                # Straight ticks repeat tangentially and stay constant radially;
+                # two-dimensional floral tiles must still stop the scan.
+                straight_ticks = (band_depth <= height * .09 and
+                    period and period <= band_depth and
+                    np.mean(np.std(band, axis=0)) < 5)
+                if period and (band_depth <= 4 * run or straight_ticks) and period <= max(4 * run, 2 * band_depth):
                     continue
                 # A sentence is not periodic. Keep sparse ink on the preceding
                 # flat background when it is enclosed by another flat row.
@@ -179,6 +203,38 @@ def _straight_outline_rows(region):
     return result
 
 
+
+def _stripe_corner_gaps(pixels, strip, period):
+    """Retain flat source corner blocks omitted by the repeating middle strip."""
+    if not period:
+        return None
+    variation = np.std(strip.astype(np.float32), axis=1).mean(axis=1)
+    rows = np.flatnonzero(variation > max(2., variation.max() * .25))
+    if not rows.size or np.any(np.diff(rows) > 1):
+        return None
+    start, end = int(rows[0]), int(rows[-1]) + 1
+    if end - start < period or np.mean(np.std(strip[start:end].astype(np.float32), axis=0)) > 5:
+        return None
+    # A blank corner is evidenced by its original pixels, never invented for
+    # every periodic ornament. Use the central portion to avoid JPEG edges.
+    lo = start + max(1, (end - start) // 4)
+    hi = start + max(2, (end - start) * 9 // 20)
+    blocks = (pixels[lo:hi, lo:hi], pixels[lo:hi, -hi:-lo],
+              pixels[-hi:-lo, -hi:-lo], pixels[-hi:-lo, lo:hi])
+    colours = []
+    for block in blocks:
+        if not block.size:
+            return None
+        colour = np.median(block.reshape(-1, 3), axis=0)
+        if np.mean(np.max(np.abs(block.astype(np.float32) - colour), axis=2) <= 8) < .95:
+            return None
+        # Corner colour must belong to the original strip, including its
+        # background; unrelated artwork squares are not decorative gaps.
+        if np.min(np.max(np.abs(strip[start:end].astype(np.float32) - colour), axis=2)) > 10:
+            return None
+        colours.append(tuple(int(v) for v in colour))
+    return start, end, tuple(colours)
+
 def analyze_layout(image):
     if image.height > image.width:
         image = image.transpose(Image.Transpose.ROTATE_90)
@@ -219,7 +275,8 @@ def analyze_layout(image):
     left = edge(pixels.transpose(1, 0, 2), detected.transpose(1, 0, 2))
     right = width - edge(pixels[:, ::-1].transpose(1, 0, 2), detected[:, ::-1].transpose(1, 0, 2))
     top = depth
-    floating = detect_floating_artwork(probe)
+    panel = detect_inset_panel(image)
+    floating = detect_floating_artwork(probe) if panel is None else None
     if floating is not None and depth:
         # A genuine repeating frame ornament is not a gallery's blank moat.
         # Do not reclassify patterned borders around ordinary cover artwork.
@@ -280,8 +337,10 @@ def analyze_layout(image):
         message += '；满幅装饰带连续环绕'
     if floating is not None:
         message += '；独立图案留白类：完整图案组等比适配，保留原素材最小留白距离'
-    panel = detect_inset_panel(image)
+    gaps = _stripe_corner_gaps(pixels, strip, period)
+    if gaps is not None:
+        message += '；保留原条纹四角空隙'
     if panel is not None:
         message += '；中央浅色框随轮廓适配，保留原间距比例'
     return SourceLayout(pixels, strip, depth, width, height, message, content,
-                        (left, top, right, bottom), period, sentence, layers, floating, panel)
+                        (left, top, right, bottom), period, sentence, layers, floating, panel, gaps)
