@@ -100,8 +100,11 @@ def recognize_sketch(path, cancelled=None):
                                     capture_output=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
             if result.returncode:
                 raise ValueError('Windows OCR 不可用，请手工填写尺寸。' + result.stderr.decode('utf-8', errors='replace')[-500:])
-            data = json.loads(result.stdout.decode('utf-8-sig'))
-            fallback = associate_dimensions(data['words'], data['width'], data['height'])
+            try:
+                data = json.loads(result.stdout.decode('utf-8-sig'))
+                fallback = associate_dimensions(data['words'], data['width'], data['height'])
+            except (json.JSONDecodeError, KeyError, UnicodeDecodeError):
+                raise ValueError('Windows OCR 返回结果无法解析，请手工填写草图尺寸。')
             if fallback.width_cm is not None:
                 return fallback
     return fallback

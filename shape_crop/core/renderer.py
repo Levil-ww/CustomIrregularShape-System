@@ -10,6 +10,9 @@ class RenderCancelled(Exception):
     pass
 
 
+MAX_PIXEL_COUNT = 180_000_000
+
+
 def blend(rgb, color, coverage):
     weight = np.clip(coverage, 0, 1)[..., None]
     rgb[:] = np.clip(rgb * (1 - weight) + color * weight, 0, 255).astype(np.uint8)
@@ -21,7 +24,7 @@ def render(design, outer_material=None, inner_material=None, max_side=None,
     if block_rows < 1:
         raise ValueError('分块行数必须大于零')
     width, height = design.pixel_size(max_side)
-    if width * height > 180_000_000:
+    if width * height > MAX_PIXEL_COUNT:
         raise ValueError('当前导出超过 1.8 亿像素，请降低 DPI 或尺寸')
     shape = create_shape(design)
     border = design.border

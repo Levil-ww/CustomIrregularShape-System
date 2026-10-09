@@ -6,13 +6,13 @@ from shape_crop.core.sampling import sample_perimeter_strip, sample_sentence_str
 from shape_crop.core.content_mapping import ContentMapping
 from shape_crop.core.framed_artwork_mapping import sample_framed_artwork
 from shape_crop.core.panel_mapping import adapt_panel
-from shape_crop.core.renderer import RenderCancelled, blend
+from shape_crop.core.renderer import RenderCancelled, blend, MAX_PIXEL_COUNT
 
 
 def render_source(design, material, inner_material=None, max_side=None, progress=None,
                   cancelled=None, block_rows=128):
     width, height = design.pixel_size(max_side)
-    if width * height > 180_000_000:
+    if width * height > MAX_PIXEL_COUNT:
         raise ValueError('当前导出超过 1.8 亿像素，请降低 DPI 或尺寸')
     layout = material.source_layout
     shape = create_shape(design)

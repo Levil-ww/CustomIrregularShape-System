@@ -21,7 +21,15 @@ PREVIEW_SOURCE_SIDE = 2400
 
 
 def load_image(path, max_side=None):
-    with Image.open(Path(path)) as source:
+    try:
+        source = Image.open(Path(path))
+    except FileNotFoundError:
+        raise ValueError(f'素材文件不存在：{path}')
+    except PermissionError:
+        raise ValueError(f'素材文件无读取权限：{path}')
+    except Exception:
+        raise ValueError(f'素材文件无法打开，可能已损坏：{path}')
+    with source:
         if max_side:
             # JPEG draft reduces pixels in the decoder, before allocating a
             # full print-resolution image. Other formats use bounded resizing.

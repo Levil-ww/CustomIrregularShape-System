@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFo
     QFileDialog, QMessageBox, QScrollArea, QProgressBar, QColorDialog)
 from shape_crop.models.design import DesignSpec, MaterialSpec
 from shape_crop.core.geometry import create_shape
+from shape_crop.core.renderer import MAX_PIXEL_COUNT
 from shape_crop.services.materials import load_image
 from shape_crop.services.project_io import save_project, load_project
 from shape_crop.workers.render_worker import RenderWorker
@@ -302,7 +303,7 @@ class ManualWindow(QMainWindow):
         try:
             spec = self.snapshot()
             width, height = spec.pixel_size()
-            if width * height > 180_000_000:
+            if width * height > MAX_PIXEL_COUNT:
                 raise ValueError('导出超过 1.8 亿像素，请降低 DPI 或尺寸')
         except ValueError as error:
             self.show_error(str(error))
