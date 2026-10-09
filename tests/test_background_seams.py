@@ -45,3 +45,5 @@ def test_texture_period_is_refined_in_original_pixels():
     art = _textured_rectangle(image,np.asarray(probe),box,(0.,0.,2600.,1800.),sx,sy)
     assert art is not None
     assert art.tile.shape[0] % 223 == 0 and art.tile.shape[1] % 157 == 0, 'Native period must match the original texture'
+    expected_box = tuple(float(v*r) for v,r in zip(box,(sx,sy,sx,sy)))
+    assert art.box == expected_box, 'Central rectangle must not include an extra ring of background stripes'

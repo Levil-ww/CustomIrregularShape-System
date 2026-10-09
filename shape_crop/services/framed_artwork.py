@@ -258,5 +258,7 @@ def _textured_rectangle(image, pixels, box, frame, sx, sy):
             and origin[0]+px < fr-padx and origin[1]+py < fb-pady):
         return None
     tile=full[origin[1]:origin[1]+py,origin[0]:origin[0]+px].copy()
-    bounds=tuple(float(v*r) for v,r in zip((a-2,b-2,c+2,d+2),(sx,sy,sx,sy)))
+    # Contrasting rectangles have no outer outline to preserve. Expanding this
+    # crop would carry a second, smaller ring of background ornament.
+    bounds=tuple(float(v*r) for v,r in zip((a,b,c,d),(sx,sy,sx,sy)))
     return FramedArtwork(bounds,frame,tile,origin,True,None)
