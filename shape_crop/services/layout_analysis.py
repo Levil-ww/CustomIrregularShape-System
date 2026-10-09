@@ -26,10 +26,13 @@ class SourceLayout:
     inset_panel: object = None
     corner_gaps: object = None
     framed_artwork: object = None
+    texture_fill: bool = False
 
     @property
     def category(self):
-        """Classify structure independently of pattern names and target sizes."""
+        """Classify the prepared visual layout for user-facing descriptions."""
+        if self.texture_fill:
+            return '满铺纹理细线类'
         if self.framed_artwork is not None:
             return '装饰背景独立画框类'
         if self.inset_panel is not None:
@@ -260,11 +263,44 @@ def _stripe_corner_gaps(pixels, strip, period):
         colours.append(tuple(int(v) for v in colour))
     return start, end, tuple(colours)
 
-def analyze_layout(image):
+def _texture_layout(pixels):
+    """Keep only the contiguous outer black stroke, never sparse stone veins."""
+    height, width = pixels.shape[:2]
+
+    def stroke(edge):
+        limit = max(1, round(edge.shape[0] * .40))
+        columns = np.linspace(edge.shape[1] * .25, edge.shape[1] * .75 - 1,
+                              min(384, max(1, edge.shape[1] // 2))).astype(int)
+        rows = edge[:limit, columns].astype(np.float32)
+        colours = np.median(rows, axis=1)
+        black = ((np.max(colours, axis=1) < 40) &
+                 (np.mean(np.max(np.abs(rows - colours[:, None]), axis=2) <= 10, axis=1) >= .995))
+        non_black = np.flatnonzero(~black)
+        return int(non_black[0]) if non_black.size else limit
+
+    top = stroke(pixels)
+    bottom_depth = stroke(pixels[::-1])
+    left = stroke(pixels.transpose(1, 0, 2))
+    right_depth = stroke(pixels[:, ::-1].transpose(1, 0, 2))
+    # A black stone edge can merge into dark veins. Keep the fine stroke rather
+    # than stretching that uncertain dark run into a broad frame.
+    positive = [value for value in (top, bottom_depth, left, right_depth) if value]
+    depth = min(positive) if positive else 0
+    right, bottom = width - right_depth, height - bottom_depth
+    content = pixels[top:bottom, left:right]
+    strip = np.zeros((max(1, depth), 1, 3), dtype=np.uint8)
+    return SourceLayout(pixels, strip, depth, width, height,
+                        '大理石纹理等比满铺，仅保留外沿细黑线，不扩展色带',
+                        content, (left, top, right, bottom), texture_fill=True)
+
+
+def analyze_layout(image, *, texture_fill=False):
     if image.height > image.width:
         image = image.transpose(Image.Transpose.ROTATE_90)
     pixels = np.asarray(image)
     height, width = pixels.shape[:2]
+    if texture_fill:
+        return _texture_layout(pixels)
     # Scan at a bounded spatial scale. At print resolution thin floral strokes
     # leave many individually flat rows and can delay the transition by thousands
     # of pixels. Only recognition is reduced; all extracted pixels stay original.

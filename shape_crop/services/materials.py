@@ -3,10 +3,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from collections import OrderedDict
 from threading import RLock
+import re
 import numpy as np
 from PIL import Image, ImageOps
 from shape_crop.models.design import MaterialSpec
 from shape_crop.services.layout_analysis import analyze_layout
+from shape_crop.services.filename_parser import parse_filename
 
 
 @dataclass(frozen=True)
@@ -121,7 +123,14 @@ def prepare(material, preview=False):
 def _prepare(material, preview):
     image = load_image(material.path, PREVIEW_SOURCE_SIDE if preview else None)
     if material.layout == 'source':
-        layout = analyze_layout(image)
+        try:
+            pattern = parse_filename(Path(material.path).name).pattern
+        except ValueError:
+            pattern = ''
+        # Plain colour marble has veins all the way to a single black outline.
+        # Crowned/framed marble designs must keep normal structural analysis.
+        texture_fill = bool(re.fullmatch(r'(?:浅|深)?(?:白|灰|黑|褐|棕|米|黄|绿|蓝|红|粉)(?:色)?大理石\d*(?:号)?(?:方形)?', pattern))
+        layout = analyze_layout(image, texture_fill=True) if texture_fill else analyze_layout(image)
         return PreparedMaterial(layout.image, layout.strip, material, layout)
     content = extract(image, material.content_box)
     strip = extract(image, material.strip_box)

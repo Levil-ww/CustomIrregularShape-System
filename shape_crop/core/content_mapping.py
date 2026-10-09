@@ -31,6 +31,10 @@ class ContentMapping:
     def create(cls, layout, diameter_cm, height_cm, border_cm, shape=None):
         scale = cls.source_scale(layout, diameter_cm, height_cm)
         left, top, right, bottom = layout.content_box_px
+        if layout.texture_fill:
+            scale = max((diameter_cm - 2 * border_cm) / (right - left),
+                        (height_cm - 2 * border_cm) / (bottom - top))
+            return cls(scale, (left + right - 1) / 2, (top + bottom - 1) / 2, left, top)
         if (layout.floating_artwork is not None or layout.framed_artwork is not None) and shape is not None:
             if layout.framed_artwork is not None:
                 artwork = layout.framed_artwork

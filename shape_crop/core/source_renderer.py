@@ -19,12 +19,20 @@ def render_source(design, material, inner_material=None, max_side=None, progress
     # One uniform scale covers both target dimensions; do not stretch the frame
     # to compensate for missing source height.
     scale = ContentMapping.source_scale(layout, design.diameter_cm, design.height_cm)
+    if layout.texture_fill:
+        # The fine outline follows the fitting rectangle scale; a very narrow
+        # source may need a much larger cover scale for its interior texture.
+        scale = min(design.diameter_cm / layout.width_px, design.height_cm / layout.height_px)
     native_border_cm = layout.border_depth_px * scale
+    if layout.texture_fill:
+        # Crop the entire source stroke, but keep the output outline at most
+        # two millimetres. Missing source strokes get a half-millimetre line.
+        native_border_cm = min(native_border_cm, .20) if native_border_cm else .05
     border_cm = native_border_cm
     # Use one symmetric frame width covering all original edges and the size allowance.
     # Every frame layer shares this radial scale; artwork uses one uniform transform.
     required_border = ContentMapping.required_border(layout, design.diameter_cm, design.height_cm)
-    if layout.border_depth_px:
+    if layout.border_depth_px and not layout.texture_fill:
         border_cm = max(border_cm, required_border)
     if border_cm >= shape.half_height:
         raise ValueError('原素材边框过宽，无法用于当前尺寸')
@@ -106,12 +114,18 @@ def render_source(design, material, inner_material=None, max_side=None, progress
             if inner_layout is None:
                 raise ValueError('自动排版的内圆素材也需采用自动模式')
             inner_depth = radius - np.hypot(x, y)
-            inner_scale = scale  # keep flowers the same physical size as the outer fill
-            inner_mapping = ContentMapping(inner_scale, (inner_layout.width_px - 1) / 2,
-                                           (inner_layout.height_px - 1) / 2,
-                                           inner_layout.content_box_px[0], inner_layout.content_box_px[1])
+            inner_scale = mapping.scale_cm if layout.texture_fill else scale
+            if inner_layout.texture_fill:
+                inner_scale = min(2 * radius / inner_layout.width_px,
+                                  2 * radius / inner_layout.height_px)
+                inner_band = min(inner_layout.border_depth_px * inner_scale, .20) or .05
+                inner_mapping = ContentMapping.create(inner_layout, 2 * radius, 2 * radius, inner_band)
+            else:
+                inner_mapping = ContentMapping(inner_scale, (inner_layout.width_px - 1) / 2,
+                                               (inner_layout.height_px - 1) / 2,
+                                               inner_layout.content_box_px[0], inner_layout.content_box_px[1])
+                inner_band = inner_layout.border_depth_px * inner_scale
             content = inner_mapping.sample(inner_layout, x, y)
-            inner_band = inner_layout.border_depth_px * inner_scale
             if inner_band >= radius:
                 raise ValueError('内圆尺寸小于原素材边框宽度')
             if inner_band:
