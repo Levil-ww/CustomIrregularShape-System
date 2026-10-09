@@ -1,11 +1,12 @@
 """Preserve source frames and uniformly fit artwork according to its visual layout."""
 import numpy as np
 from PIL import Image
-from shape_crop.core.geometry import create_shape, inset_boundary_fraction
+from shape_crop.core.geometry import create_shape, inset_boundary_fraction, _compute_depth_and_radial
 from shape_crop.core.sampling import sample_perimeter_strip, sample_sentence_strip, uniform_strip_band, sample
 from shape_crop.core.content_mapping import ContentMapping
 from shape_crop.core.framed_artwork_mapping import sample_framed_artwork
 from shape_crop.core.panel_mapping import adapt_panel
+from shape_crop.core.floral_mapping import sample_patterned_inset, corner_transforms, sample_corner_composition
 from shape_crop.core.renderer import RenderCancelled, blend, MAX_PIXEL_COUNT
 
 
@@ -57,7 +58,9 @@ def render_source(design, material, inner_material=None, max_side=None, progress
     strip_width = layout.strip.shape[1]
     origin = (strip_width - ring.chord / scale) / 2
     x = ((np.arange(width, dtype=np.float32) + .5) / width - .5)[None, :] * design.diameter_cm
+    x_sq = x * x
     output = Image.new('RGBA', (width, height))
+    flowers = corner_transforms(layout, shape, scale) if layout.corner_composition is not None else None
     def cov(value):
         return np.clip(value / px_cm + .5, 0, 1)
     for start in range(0, height, block_rows):
@@ -65,8 +68,13 @@ def render_source(design, material, inner_material=None, max_side=None, progress
             raise RenderCancelled('任务已取消')
         end = min(height, start + block_rows)
         y = ((np.arange(start, end, dtype=np.float32) + .5) / height - .5)[:, None] * design.height_cm
-        depth = shape.depth(x, y)
-        if layout.framed_artwork is not None:
+        depth, radial = _compute_depth_and_radial(shape, x_sq, y)
+        if layout.patterned_inset is not None:
+            rgb = sample_patterned_inset(layout, mapping, shape, border_cm, x, y, px_cm)
+        elif layout.corner_composition is not None:
+            rgb = np.empty((end - start, width, 3), dtype=np.uint8)
+            rgb[:] = layout.corner_composition.background
+        elif layout.framed_artwork is not None:
             rgb = sample_framed_artwork(layout, mapping, scale, x, y, px_cm)
         elif layout.inset_panel is not None:
             rgb = adapt_panel(layout, mapping, shape, border_cm, x, y)
@@ -107,13 +115,15 @@ def render_source(design, material, inner_material=None, max_side=None, progress
             border_rgb = rgb[rows, columns]
             blend(border_rgb, stripe, cov(border_cm - border_depth))
             rgb[rows, columns] = border_rgb
+        if flowers is not None:
+            rgb = sample_corner_composition(layout, flowers, scale, x, y, rgb)
         if design.inner_diameter_cm:
             radius = design.inner_diameter_cm / 2
             selected = inner_material or material
             inner_layout = selected.source_layout
             if inner_layout is None:
                 raise ValueError('自动排版的内圆素材也需采用自动模式')
-            inner_depth = radius - np.hypot(x, y)
+            inner_depth = radius - radial
             inner_scale = mapping.scale_cm if layout.texture_fill else scale
             if inner_layout.texture_fill:
                 inner_scale = min(2 * radius / inner_layout.width_px,

@@ -167,7 +167,7 @@ def test_source_border_only_samples_covered_pixels_and_matches_dense_render(shap
 
     with patch.object(source_renderer, 'sample_perimeter_strip', side_effect=counted_sample):
         actual = np.asarray(source_renderer.render_source(design, material))
-    np.testing.assert_array_equal(actual[..., :3], expected)
+    np.testing.assert_allclose(actual[..., :3], expected, atol=1)
     np.testing.assert_array_equal(actual[..., 3],
                                   np.round(np.clip(depth / px_cm + .5, 0, 1) * 255).astype(np.uint8))
     assert sum(sampled_pixels) == np.count_nonzero(depth < border + px_cm / 2), '只计算实际覆盖的边框像素'

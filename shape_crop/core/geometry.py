@@ -142,6 +142,33 @@ def create_shape(design):
     return CircularBand(design.diameter_cm, design.height_cm)
 
 
+def _compute_depth_and_radial(shape, x_sq, y):
+    """Inline depth + radial computation using precomputed x².
+
+    Eliminates the np.hypot call inside shape.depth() and returns
+    radial distance for reuse by inner-circle logic.
+    """
+    abs_y = np.abs(y)
+    straight_depth = shape.half_height - abs_y
+    y_sq = y * y
+    radial = np.sqrt(x_sq + y_sq)
+    if isinstance(shape, ArcBand):
+        center = shape.center
+        radius = shape.radius
+        abs_x = np.sqrt(x_sq)
+        abs_x_minus_center = np.abs(abs_x - center)
+        theta = np.clip(np.arctan2(y, abs_x_minus_center), -shape.angle, shape.angle)
+        px = center + radius * np.cos(theta)
+        py = radius * np.sin(theta)
+        arc_distance = np.sqrt((abs_x - px) ** 2 + (y - py) ** 2)
+        limit = center + np.sqrt(np.maximum(0, radius ** 2 - np.minimum(abs_y, shape.half_height) ** 2))
+        signed = np.where(abs_x <= limit, arc_distance, -arc_distance)
+        depth = np.minimum(straight_depth, signed)
+    else:
+        depth = np.minimum(shape.radius - radial, straight_depth)
+    return depth, radial
+
+
 def inset_boundary_fraction(shape, x, y, depth, reference=None):
     """Continuous perimeter coordinate on each pixel's parallel contour.
 

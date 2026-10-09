@@ -2,7 +2,7 @@
 import math
 import numpy as np
 from PIL import Image
-from shape_crop.core.geometry import create_shape
+from shape_crop.core.geometry import create_shape, _compute_depth_and_radial
 from shape_crop.core.sampling import content_sample, strip_sample
 
 
@@ -31,6 +31,7 @@ def render(design, outer_material=None, inner_material=None, max_side=None,
     px_cm = max(design.diameter_cm / width, design.height_cm / height)
     x = ((np.arange(width, dtype=np.float32) + .5) / width - .5) * design.diameter_cm
     x = x[None, :]
+    x_sq = x * x
     output = Image.new('RGBA', (width, height))
     frame = shape.inset(border.margin_cm)
     content_shape = shape.inset(border.inset_cm)
@@ -45,8 +46,7 @@ def render(design, outer_material=None, inner_material=None, max_side=None,
         end = min(start + block_rows, height)
         y = ((np.arange(start, end, dtype=np.float32) + .5) / height - .5) * design.height_cm
         y = y[:, None]
-        radial = np.hypot(x, y)
-        depth = shape.depth(x, y)
+        depth, radial = _compute_depth_and_radial(shape, x_sq, y)
         rgb = np.empty((end - start, width, 3), dtype=np.uint8)
         rgb[:] = design.background
         if outer_material:
