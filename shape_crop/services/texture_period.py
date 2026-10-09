@@ -23,7 +23,16 @@ def extract_period(strip):
     if rows.size == 0:
         return strip.copy(), 0
     rows = rows[np.linspace(0, len(rows) - 1, min(32, len(rows))).astype(int)]
-    signature = strip[rows].astype(np.float32).mean(axis=(0, 2))
+    region = strip[rows].astype(np.float32)
+    signature = region.mean(axis=(0, 2))
+    # Opposite checker rows cancel when averaged; JPEG noise can then suggest
+    # a long multiple or hide the period entirely. Use a strong source row
+    # when averaging has lost most of its contrast, and still validate every
+    # selected row below before accepting a repeat.
+    row_variance = np.var(region, axis=1)
+    strongest = np.unravel_index(np.argmax(row_variance), row_variance.shape)
+    if np.var(signature) < row_variance[strongest] * .10:
+        signature = region[strongest[0], :, strongest[1]]
     stride = max(1, int(np.ceil(width / 4096)))
     signal = signature[::stride].astype(np.float64)
     signal -= signal.mean()
@@ -43,7 +52,6 @@ def extract_period(strip):
             continue
         error, period = min(errors)
         # Check all selected rows too: their average alone can conceal alternating motifs.
-        region = strip[rows].astype(np.float32)
         full_error = float(np.mean((region[:, period:] - region[:, :-period])**2))
         full_variance = float(np.mean(np.var(region, axis=1)))
         if full_error > max(3., full_variance * .12):

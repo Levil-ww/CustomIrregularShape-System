@@ -122,7 +122,19 @@ def boundary_depth(pixels):
                 straight_ticks = (band_depth <= height * .09 and
                     period and period <= band_depth and
                     np.mean(np.std(band, axis=0)) < 5)
-                if period and (band_depth <= 4 * run or straight_ticks) and period <= max(4 * run, 2 * band_depth):
+                # Two checker rows are wider than the compact bead allowance.
+                # Prove their alternating half-period cells instead of raising
+                # the limit for every periodic floral band.
+                half_period = period // 2 if period else 0
+                dark = np.max(band, axis=2) < 40
+                ink_fraction = np.mean(dark, axis=1)
+                checker_rows = (ink_fraction >= .25) & (ink_fraction <= .75)
+                checker = (period and band_depth <= height * .07 + 2 and
+                    .7 * period <= band_depth <= 1.4 * period and
+                    np.mean(checker_rows) >= .85 and
+                    np.mean(dark[checker_rows, half_period:] !=
+                            dark[checker_rows, :-half_period]) >= .90)
+                if period and (band_depth <= 4 * run or straight_ticks or checker) and period <= max(4 * run, 2 * band_depth):
                     continue
                 # A sentence is not periodic. Keep sparse ink on the preceding
                 # flat background when it is enclosed by another flat row.
