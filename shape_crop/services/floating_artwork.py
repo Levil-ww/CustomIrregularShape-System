@@ -104,3 +104,70 @@ def detect_floating_artwork(image):
     bounds = tuple(value * ratio for value, ratio in zip(bounds, ratios))
     frame = tuple(value * ratio for value, ratio in zip(frame, ratios))
     return bounds, frame, tuple(int(value) for value in background)
+
+
+def detect_contrasting_artwork(image):
+    """Detect one dense picture whose flat moat differs from its interior."""
+    probe = image.copy()
+    probe.thumbnail((800, 800))
+    pixels = np.asarray(probe)
+    h, w = pixels.shape[:2]
+    band = max(3, round(min(h, w) * .035))
+    edges = np.concatenate((pixels[:band].reshape(-1, 3), pixels[-band:].reshape(-1, 3),
+                            pixels[:, :band].reshape(-1, 3), pixels[:, -band:].reshape(-1, 3)))
+    background = np.median(edges, axis=0)
+    if np.mean(np.max(np.abs(edges.astype(float) - background), axis=1) < 12) < .60:
+        return None
+    foreground = np.max(np.abs(pixels.astype(np.float32) - background), axis=2) > 24
+    frames, pictures, outlines = [], [], []
+    for box, count in _components(foreground):
+        a, b, c, d = box
+        area = (c - a) * (d - b)
+        if c - a > w * .8 and d - b > h * .7 and count < area * .15:
+            # Only complete thin rectangles are outer frames. Dense filled
+            # pictures can be equally large but belong to the artwork group.
+            frame_mask = foreground[b:d, a:c]
+            edge_width = max(2, round(min(w, h) * .008))
+            sides = (frame_mask[:edge_width, edge_width:-edge_width].mean(axis=1),
+                     frame_mask[-edge_width:, edge_width:-edge_width].mean(axis=1),
+                     frame_mask[edge_width:-edge_width, :edge_width].mean(axis=0),
+                     frame_mask[edge_width:-edge_width, -edge_width:].mean(axis=0))
+            if all(values.size and np.max(values) > .95 for values in sides):
+                frames.append(box)
+            else:
+                outlines.append(box)
+        elif c - a > w * .5 and d - b > h * .4 and count > area * .6:
+            pictures.append(box)
+        elif count > max(12, w * h * .0002):
+            return None
+    if len(pictures) != 1 or not frames:
+        return None
+    bounds = pictures[0]
+    for outline in outlines:
+        a, b, c, d = bounds
+        e, f, g, j = outline
+        tolerance = max(4, min(w, h) * .035)
+        if not (e <= a and f <= b and g >= c and j >= d and
+                max(a - e, b - f, g - c, j - d) < tolerance):
+            return None
+        bounds = (e, f, g, j)
+    a, b, c, d = bounds
+    left, top, right, bottom = frame = (max(box[0] for box in frames), max(box[1] for box in frames),
+                                       min(box[2] for box in frames), min(box[3] for box in frames))
+    # The image edge alone is not an independent frame: coloured border
+    # bands with an attached inner outline must keep their established path.
+    if min(left, top, w - right, h - bottom) < max(2, min(w, h) * .005):
+        return None
+    if min(a - left, b - top, right - c, bottom - d) < max(3, min(w, h) * .015):
+        return None
+    # A complete quiet strip on every side proves isolation. Remove only the
+    # verified thin outer frame strokes, not arbitrary contrasting colour bands.
+    padding = max(2, round(min(w, h) * .008))
+    moat = (foreground[top + padding:b, left + padding:right - padding],
+            foreground[d:bottom - padding, left + padding:right - padding],
+            foreground[b:d, left + padding:a], foreground[b:d, c:right - padding])
+    if any(not region.size or np.mean(region) > .10 for region in moat):
+        return None
+    ratios = (image.width / w, image.height / h) * 2
+    return (tuple(float(v * r) for v, r in zip(bounds, ratios)),
+            tuple(float(v * r) for v, r in zip(frame, ratios)), tuple(int(v) for v in background))

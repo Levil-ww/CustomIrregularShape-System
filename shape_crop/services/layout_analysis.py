@@ -3,9 +3,9 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image
 from shape_crop.services.texture_period import extract_period, extract_dark_period
-from shape_crop.services.floating_artwork import detect_floating_artwork
+from shape_crop.services.floating_artwork import detect_floating_artwork, detect_contrasting_artwork
 from shape_crop.services.inset_panel import detect_inset_panel
-from shape_crop.services.framed_artwork import detect_framed_artwork
+from shape_crop.services.framed_artwork import detect_framed_artwork, detect_rectangular_artwork
 
 
 @dataclass(frozen=True)
@@ -292,6 +292,25 @@ def analyze_layout(image):
         left, top, right, bottom = (round(value) for value in framed.frame)
     panel = detect_inset_panel(image)
     floating = detect_floating_artwork(probe) if panel is None else None
+    if framed is None and floating is None and panel is None:
+        # Genuine border ornaments retain their complete band and inner margin.
+        probe_depth = max(1, round(depth * probe.height / height))
+        probe_left = max(0, round(left * probe.width / width))
+        probe_right = max(probe_left + 1, round(right * probe.width / width))
+        frame_region = detected[:probe_depth, probe_left:probe_right]
+        _, outer_period = extract_period(frame_region)
+        # JPEG noise can have a tiny period on an otherwise flat frame.
+        ornament_rows = np.max(np.std(frame_region.astype(np.float32), axis=1), axis=1) > 3
+        has_ornament = np.count_nonzero(ornament_rows) >= max(2, len(frame_region) * .20)
+        if not outer_period or not has_ornament:
+            framed = detect_rectangular_artwork(image, (left, top, right, bottom))
+        if framed is not None:
+            left, top, right, bottom = (round(value) for value in framed.frame)
+            depth = top
+    contrasting = None
+    if floating is None and panel is None and framed is None:
+        contrasting = detect_contrasting_artwork(probe)
+        floating = contrasting
     if floating is not None and depth:
         # A genuine repeating frame ornament is not a gallery's blank moat.
         # Do not reclassify patterned borders around ordinary cover artwork.
@@ -301,9 +320,12 @@ def analyze_layout(image):
         frame_region = detected[:probe_depth, probe_left:probe_right]
         _, frame_period = extract_period(frame_region)
         # Small, disconnected letters fall below the gallery component area
-        # threshold. A detected sentence frame must retain precedence, or the
-        # gallery path leaves its ink in the content to be clipped by the arc.
-        if (frame_period and frame_period >= 4) or _sentence_layer(frame_region) is not None:
+        # threshold. Keep sentence precedence for the sparse gallery detector.
+        # A verified contrasting filled panel may instead explain the apparent
+        # sentence as a wavy outline; preserve that outline with its artwork.
+        if (frame_period and frame_period >= 4) or (
+            contrasting is None and _sentence_layer(frame_region) is not None
+        ):
             floating = None
     if floating is not None:
         bounds, frame, background = floating
