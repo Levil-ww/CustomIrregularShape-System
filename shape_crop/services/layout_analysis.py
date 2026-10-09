@@ -3,7 +3,8 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image
 from shape_crop.services.texture_period import extract_period, extract_dark_period
-from shape_crop.services.floating_artwork import detect_floating_artwork, detect_contrasting_artwork
+from shape_crop.services.floating_artwork import (detect_floating_artwork,
+    detect_contrasting_artwork, detect_neutral_background_artwork)
 from shape_crop.services.inset_panel import detect_inset_panel
 from shape_crop.services.framed_artwork import detect_framed_artwork, detect_rectangular_artwork
 
@@ -291,7 +292,9 @@ def analyze_layout(image):
     if framed is not None:
         left, top, right, bottom = (round(value) for value in framed.frame)
     panel = detect_inset_panel(image)
-    floating = detect_floating_artwork(probe) if panel is None else None
+    floating = None
+    if panel is None:
+        floating = detect_floating_artwork(probe) or detect_neutral_background_artwork(probe)
     if framed is None and floating is None and panel is None:
         # Genuine border ornaments retain their complete band and inner margin.
         probe_depth = max(1, round(depth * probe.height / height))
@@ -311,10 +314,18 @@ def analyze_layout(image):
     if floating is None and panel is None and framed is None:
         contrasting = detect_contrasting_artwork(probe)
         floating = contrasting
-    if floating is not None and depth:
-        # A genuine repeating frame ornament is not a gallery's blank moat.
-        # Do not reclassify patterned borders around ordinary cover artwork.
+    # The neutral-background detector has already verified all four strips;
+    # grey veins are background variation, not sentence/ornament evidence.
+    if floating is not None and depth and floating[2] is not None:
+        # Check only the proven moat, never artwork reached by the edge scan.
+        # Pale triangles and picture edges can otherwise resemble sentences
+        # or periodic perimeter ornaments and disable the uniform fit.
         probe_depth = max(1, round(depth * probe.height / height))
+        artwork_top = floating[0][1] - max(3, probe.height * .005)
+        # Components near the outer edge may themselves be shallow border
+        # ornaments. Keep their full scan so genuine repeats retain precedence.
+        if floating[0][1] >= probe.height * .10:
+            probe_depth = max(1, min(probe_depth, round(artwork_top)))
         probe_left = max(0, round(left * probe.width / width))
         probe_right = max(probe_left + 1, round(right * probe.width / width))
         frame_region = detected[:probe_depth, probe_left:probe_right]

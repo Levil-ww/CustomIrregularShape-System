@@ -71,7 +71,12 @@ def detect_floating_artwork(image):
     gaps = (bounds[0] - frame[0], bounds[1] - frame[1], frame[2] - bounds[2], frame[3] - bounds[3])
     # A real blank moat on ALL sides distinguishes gallery-style compositions
     # from edge-to-edge tiles, horizontal floral bands and decorative frames.
-    if min(gaps) < max(3, min(width, height) * .05):
+    if min(gaps) < max(3, min(width, height) * .02):
+        return None
+    # Square gallery groups can have narrow side clearances and large blank
+    # areas above/below. Edge lettering with similarly narrow vertical gaps
+    # still belongs to the frame, not to the central artwork group.
+    if min(gaps) < min(width, height) * .05 and min(gaps[1], gaps[3]) < height * .10:
         return None
     # Component bounds alone can mistake a contrasting text/frame band for
     # empty space: large connected outlines are excluded from artwork above.
@@ -171,3 +176,45 @@ def detect_contrasting_artwork(image):
     ratios = (image.width / w, image.height / h) * 2
     return (tuple(float(v * r) for v, r in zip(bounds, ratios)),
             tuple(float(v * r) for v, r in zip(frame, ratios)), tuple(int(v) for v in background))
+
+
+def detect_neutral_background_artwork(image):
+    """Fit isolated coloured artwork on a light neutral, nonperiodic background.
+
+    Colour identifies the complete group independently of grey marble veins.
+    The surrounding source pixels remain part of the uniformly scaled content;
+    no flat replacement colour or repeating texture is manufactured.
+    """
+    probe = image.copy()
+    probe.thumbnail((800, 800))
+    pixels = np.asarray(probe).astype(np.float32)
+    height, width = pixels.shape[:2]
+    chromatic = np.ptp(pixels, axis=2) > 24
+    artwork = [box for box, count in _components(chromatic)
+               if count >= max(12, width * height * .0002)]
+    if not artwork:
+        return None
+    bounds = (min(b[0] for b in artwork), min(b[1] for b in artwork),
+              max(b[2] for b in artwork), max(b[3] for b in artwork))
+    a, b, c, d = bounds
+    padding = max(3, round(min(width, height) * .008))
+    if min(a, b, width - c, height - d) < max(4, min(width, height) * .025):
+        return None
+    strips = (pixels[padding:b, padding:width-padding],
+              pixels[d:height-padding, padding:width-padding],
+              pixels[b:d, padding:a], pixels[b:d, c:width-padding])
+    # Every side must be a light neutral background. This excludes coloured
+    # frames, full-span flowers, edge sentences and disconnected outer motifs.
+    for strip in strips:
+        if not strip.size:
+            return None
+        neutral = np.ptp(strip, axis=2) < 12
+        light = np.min(strip, axis=2) > 170
+        dark = np.max(strip, axis=2) < 100
+        if np.mean(neutral & light) < .95 or np.mean(dark) > .01:
+            return None
+    # Include antialiasing without removing the proven source clearance.
+    bounds = (a - 2, b - 2, c + 2, d + 2)
+    ratios = (image.width / width, image.height / height) * 2
+    return (tuple(float(v * r) for v, r in zip(bounds, ratios)),
+            (0., 0., float(image.width), float(image.height)), None)
