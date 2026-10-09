@@ -81,6 +81,7 @@ def test_native_recursive_watcher_and_shutdown(tmp_path):
         assert notified
         assert session.match(target).path == str(new)
     finally:
+        thread = session._thread
         session.close()
-        session._thread.join(2)
-    assert not session._thread.is_alive()
+        thread.join(2)
+    assert not thread.is_alive()

@@ -26,9 +26,14 @@ class CatalogSession:
         self.watch_error = ''
 
     def start(self):
-        if self._thread is None and os.name == 'nt':
-            self._thread = Thread(target=self._watch, name='catalog-watch', daemon=True)
-            self._thread.start()
+        with self._lock:
+            dead = self._thread is not None and not getattr(self._thread, 'is_alive', lambda: True)()
+            if dead:
+                self._thread = None
+            if self._thread is None and os.name == 'nt':
+                self._stop.clear()
+                self._thread = Thread(target=self._watch, name='catalog-watch', daemon=True)
+                self._thread.start()
         self._ready.wait(2 if os.name == 'nt' else 0)
 
     @property
@@ -109,7 +114,13 @@ class CatalogSession:
                     raw = buffer.raw[:received.value]
                     while offset + 12 <= len(raw):
                         step, action, size = struct.unpack_from('<III', raw, offset)
-                        name = raw[offset + 12:offset + 12 + size].decode('utf-16-le')
+                        try:
+                            name = raw[offset + 12:offset + 12 + size].decode('utf-16-le')
+                        except UnicodeDecodeError:
+                            if not step:
+                                break
+                            offset += step
+                            continue
                         path = os.path.normpath(os.path.join(self.directory, name))
                         events.append((action, path))
                         if not step:
@@ -125,4 +136,5 @@ class CatalogSession:
             with self._lock:
                 self._active = False
                 self._handle = None
+                self._thread = None
                 kernel.CloseHandle(handle)
