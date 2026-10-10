@@ -102,6 +102,9 @@ class ArcBand:
     def inset(self, distance):
         if not math.isfinite(distance) or distance < 0 or 2 * distance >= self.height:
             raise ValueError('轮廓内缩距离不合法')
+        sagitta = (self.diameter - self.chord) / 2
+        max_distance = math.sqrt(max(0., self.height**2 - 4 * sagitta**2)) / 2
+        distance = min(distance, max_distance)
         radius, half_h = self.radius - distance, self.half_height - distance
         chord = 2 * (self.center + math.sqrt(max(0, radius**2 - half_h**2)))
         return ArcBand(self.diameter - 2 * distance, 2 * half_h, chord)

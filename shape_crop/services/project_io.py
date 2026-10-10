@@ -3,6 +3,7 @@ from dataclasses import asdict
 import json
 import os
 from pathlib import Path
+import tempfile
 from shape_crop.models.design import BorderSpec, CropBox, DesignSpec, MaterialSpec
 
 
@@ -16,7 +17,15 @@ def save_project(path, design):
                 payload[key]['path'] = os.path.relpath(payload[key]['path'], path.parent)
             except ValueError:  # Different Windows drives.
                 pass
-    path.write_text(json.dumps({'schema_version': 1, 'design': payload}, ensure_ascii=False, indent=2), encoding='utf-8')
+    handle, temporary = tempfile.mkstemp(prefix='.project-', suffix='.json', dir=path.parent)
+    os.close(handle)
+    try:
+        with open(temporary, 'w', encoding='utf-8') as f:
+            json.dump({'schema_version': 1, 'design': payload}, f, ensure_ascii=False, indent=2)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def load_project(path):

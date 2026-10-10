@@ -114,6 +114,8 @@ class CatalogSession:
                     raw = buffer.raw[:received.value]
                     while offset + 12 <= len(raw):
                         step, action, size = struct.unpack_from('<III', raw, offset)
+                        if offset + 12 + size > len(raw):
+                            break
                         try:
                             name = raw[offset + 12:offset + 12 + size].decode('utf-16-le')
                         except UnicodeDecodeError:

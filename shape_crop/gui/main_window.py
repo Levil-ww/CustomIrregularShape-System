@@ -404,6 +404,9 @@ class MainWindow(QMainWindow):
         self.sketch_review.show()
         self.straight_value.setValue(0)
         pixmap = QPixmap(path)
+        if pixmap.isNull():
+            self.status.setText('草图文件无法识别为图片，请检查格式')
+            return
         self.sketch_image.setPixmap(pixmap.scaled(320, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         self.sketch_image.show()
         self.controls.setEnabled(False)
