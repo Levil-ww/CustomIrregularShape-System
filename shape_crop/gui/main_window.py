@@ -27,7 +27,7 @@ TARGET_HISTORY_LIMIT = 15
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f'素材裁剪工作台 · {__version__}')
+        self.setWindowTitle(f'异形智裁 · {__version__}')
         self.resize(1280, 850)
         self.setMinimumSize(1000, 720)
         apply_theme(self)
@@ -46,7 +46,7 @@ class MainWindow(QMainWindow):
         page.setSpacing(16)
         header = QHBoxLayout()
         heading = QVBoxLayout()
-        title = QLabel('素材裁剪工作台')
+        title = QLabel('异形智裁工作台')
         title.setObjectName('title')
         subtitle = QLabel('多模块素材裁剪  ·  本地处理，保留原图花纹与边框')
         subtitle.setObjectName('subtitle')
