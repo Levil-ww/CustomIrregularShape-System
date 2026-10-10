@@ -5,7 +5,7 @@ from shape_crop.core.geometry import create_shape, inset_boundary_fraction, _com
 from shape_crop.core.sampling import sample_perimeter_strip, sample_sentence_strip, uniform_strip_band, sample
 from shape_crop.core.content_mapping import ContentMapping
 from shape_crop.core.round_rings import recognize_round_ring, sample_round_rings
-from shape_crop.core.framed_artwork_mapping import sample_framed_artwork
+from shape_crop.core.framed_artwork_mapping import sample_framed_artwork, sample_contoured_frame
 from shape_crop.core.panel_mapping import adapt_panel
 from shape_crop.core.floral_mapping import sample_patterned_inset, corner_transforms, sample_corner_composition
 from shape_crop.core.renderer import RenderCancelled, blend, MAX_PIXEL_COUNT
@@ -43,11 +43,13 @@ def render_source(design, material, inner_material=None, max_side=None, progress
     mapping = ContentMapping.create(layout, design.diameter_cm, design.height_cm, border_cm, shape=shape)
     px_cm = max(design.diameter_cm / width, design.height_cm / height)
     extra_cm = border_cm - native_border_cm
-    plain_band = uniform_strip_band(layout.strip) if extra_cm > 1e-9 else None
+    frame_strip = layout.strip if layout.layered_strip is None else layout.layered_strip[1]
+    plain_band = uniform_strip_band(frame_strip) if extra_cm > 1e-9 else None
     if extra_cm > 1e-9 and plain_band is None:
         raise ValueError('当前素材边框需要加宽，但没有足够的纯色留白；为避免装饰变形，请换用比例更接近或四边边框一致的素材')
     # Anchor tangential scale near the artwork, not in the expanded blank margin.
-    ornament = np.max(np.ptp(layout.strip, axis=1), axis=1).astype(np.float64)
+    ornament_strip = layout.strip if layout.layered_strip is None else layout.strip[:layout.layered_strip[0]]
+    ornament = np.max(np.ptp(ornament_strip, axis=1), axis=1).astype(np.float64)
     ring_depth = native_border_cm / 2
     if ornament.sum():
         source_depth = float(np.average(np.arange(len(ornament)) + .5, weights=ornament))
@@ -57,7 +59,8 @@ def render_source(design, material, inner_material=None, max_side=None, progress
     ring_depth = min(ring_depth, shape.half_height - 1e-6) if border_cm else 0.0
     ring = shape.inset(ring_depth) if border_cm else shape
     round_ring = (recognize_round_ring(layout.strip)
-                  if layout.strip_period_px and not layout.strip_is_sentence and layout.corner_gaps is None else None)
+                  if layout.strip_period_px and not layout.strip_is_sentence and layout.corner_gaps is None
+                  and layout.layered_strip is None else None)
     # Near-full circles can leave a straight shorter than adjacent glyphs.
     # Keep the established mapping rather than introduce colliding endpoint rings.
     if round_ring is not None and 1e-8 < ring.chord < 2 * round_ring[4] * scale:
@@ -78,7 +81,7 @@ def render_source(design, material, inner_material=None, max_side=None, progress
     if design.inner_diameter_cm:
         selected_layout = (inner_material or material).source_layout
         if selected_layout is not None and (selected_layout.patterned_inset is not None or
-                                            selected_layout.corner_composition is not None):
+                                            selected_layout.corner_composition is not None or selected_layout.contoured_frame is not None):
             inner_shape = CircularBand(design.inner_diameter_cm, design.inner_diameter_cm)
             composition_scale = ContentMapping.source_scale(selected_layout, inner_shape.diameter, inner_shape.height)
             if selected_layout.corner_composition is not None:
@@ -96,6 +99,8 @@ def render_source(design, material, inner_material=None, max_side=None, progress
         elif layout.corner_composition is not None:
             rgb = np.empty((end - start, width, 3), dtype=np.uint8)
             rgb[:] = layout.corner_composition.background
+        elif layout.contoured_frame is not None:
+            rgb = sample_contoured_frame(layout, shape, scale, border_cm, x, y, px_cm)
         elif layout.framed_artwork is not None:
             rgb = sample_framed_artwork(layout, mapping, scale, x, y, px_cm)
         elif layout.inset_panel is not None:
@@ -128,6 +133,11 @@ def render_source(design, material, inner_material=None, max_side=None, progress
             else:
                 stripe = sample_perimeter_strip(layout.strip, s, sample_depth,
                                                  ring.perimeter, scale, origin)
+            if layout.layered_strip is not None:
+                outer_depth, full_strip = layout.layered_strip
+                inner_rows = sample_depth >= outer_depth
+                stripe[inner_rows] = sample_perimeter_strip(full_strip, s[inner_rows], sample_depth[inner_rows],
+                    ring.perimeter, scale, (full_strip.shape[1] - ring.chord / scale) / 2)
             if round_ring is not None:
                 stripe = sample_round_rings(round_ring, ring, scale, x[0, columns],
                     y[rows, 0], sample_depth, stripe)
@@ -166,7 +176,9 @@ def render_source(design, material, inner_material=None, max_side=None, progress
                                                (inner_layout.height_px - 1) / 2,
                                                inner_layout.content_box_px[0], inner_layout.content_box_px[1])
                 inner_band = inner_layout.border_depth_px * inner_scale
-            if inner_layout.patterned_inset is not None:
+            if inner_layout.contoured_frame is not None:
+                content = sample_contoured_frame(inner_layout, inner_shape, inner_scale, inner_band, x, y, px_cm)
+            elif inner_layout.patterned_inset is not None:
                 content = sample_patterned_inset(inner_layout, inner_mapping, inner_shape, inner_band, x, y, px_cm)
             elif inner_layout.corner_composition is not None:
                 content = np.empty(np.broadcast_shapes(x.shape, y.shape) + (3,), dtype=np.uint8)
@@ -181,6 +193,12 @@ def render_source(design, material, inner_material=None, max_side=None, progress
                 stripe = sample_perimeter_strip(inner_layout.strip, arc,
                                                 np.maximum(0, inner_depth / inner_scale - .5),
                                                 inner_perimeter, inner_scale)
+                if inner_layout.layered_strip is not None:
+                    outer_depth, full_strip = inner_layout.layered_strip
+                    source_depth = np.maximum(0, inner_depth / inner_scale - .5)
+                    inner_rows = source_depth >= outer_depth
+                    stripe[inner_rows] = sample_perimeter_strip(full_strip, np.broadcast_to(arc, inner_rows.shape)[inner_rows],
+                        source_depth[inner_rows], inner_perimeter, inner_scale)
                 blend(content, stripe, cov(inner_band - inner_depth))
             if inner_flowers is not None:
                 content = sample_corner_composition(inner_layout, inner_flowers, inner_scale, x, y, content)

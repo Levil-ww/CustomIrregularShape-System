@@ -9,6 +9,7 @@ from PIL import Image, ImageOps
 from shape_crop.models.design import MaterialSpec
 from shape_crop.services.layout_analysis import analyze_layout
 from shape_crop.services.filename_parser import parse_filename
+from shape_crop.services.contoured_frame import adapt_contoured_frame
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,10 @@ def prepare(material, preview=False):
     arrays = [result.content, result.strip]
     if result.source_layout:
         arrays.extend((result.source_layout.image, result.source_layout.content))
+        if result.source_layout.layered_strip is not None:
+            arrays.append(result.source_layout.layered_strip[1])
+        if result.source_layout.contoured_frame is not None:
+            arrays.append(result.source_layout.contoured_frame.stroke)
         if result.source_layout.framed_artwork is not None:
             arrays.append(result.source_layout.framed_artwork.tile)
         if result.source_layout.corner_composition is not None:
@@ -137,6 +142,8 @@ def _prepare(material, preview):
             layout = analyze_layout(image, composition_hint=hint)
         else:
             layout = analyze_layout(image, texture_fill=True) if texture_fill else analyze_layout(image)
+        if pattern == '哥特玫瑰':
+            layout = adapt_contoured_frame(layout)
         return PreparedMaterial(layout.image, layout.strip, material, layout)
     content = extract(image, material.content_box)
     strip = extract(image, material.strip_box)

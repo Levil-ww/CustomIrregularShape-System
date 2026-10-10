@@ -30,10 +30,14 @@ class SourceLayout:
     texture_fill: bool = False
     patterned_inset: object = None
     corner_composition: object = None
+    layered_strip: object = None
+    contoured_frame: object = None
 
     @property
     def category(self):
         """Classify the prepared visual layout for user-facing descriptions."""
+        if self.contoured_frame is not None:
+            return '纹理内框随轮廓类'
         if self.patterned_inset is not None:
             return '中央花纹内框类'
         if self.corner_composition is not None:
@@ -333,6 +337,55 @@ def _closed_thin_frame(pixels):
     return l1, t1, width - r1, height - b1
 
 
+def _closed_textured_frame(pixels, bounds):
+    """Extend periodic ticks only to a proven, bounded light inner rectangle."""
+    height, width = pixels.shape[:2]
+    limit = round(min(height, width) * .22)
+    sides = (pixels, pixels.transpose(1, 0, 2), pixels[::-1],
+             pixels[:, ::-1].transpose(1, 0, 2))
+    starts = (bounds[1], bounds[0], height - bounds[3], width - bounds[2])
+    found, colours = [], []
+    for side, start in zip(sides, starts):
+        rows = side[:limit + 8, round(side.shape[1] * .3):round(side.shape[1] * .7)].astype(np.float32)
+        medians = np.median(rows, axis=1)
+        uniform = np.mean(np.max(np.abs(rows - medians[:, None]), axis=2) <= 10, axis=1) >= .98
+        bright = uniform & (np.min(medians, axis=1) > 120)
+        candidates = []
+        for begin in range(max(start + 3, 6), limit):
+            if not bright[begin] or bright[begin - 1]:
+                continue
+            end = begin + 1
+            while end < len(bright) and bright[end]:
+                end += 1
+            if end >= limit or end - begin > max(4, round(limit * .05)):
+                continue
+            before, after = medians[begin - 5], medians[end + 4]
+            colour = np.median(medians[begin:end], axis=0)
+            if (np.max(np.abs(before - after)) <= 20 and
+                    min(np.max(np.abs(colour - before)), np.max(np.abs(colour - after))) > 25):
+                candidates.append((begin, end, colour))
+        if len(candidates) != 1:
+            return None
+        begin, end, colour = candidates[0]
+        found.append((begin, end))
+        colours.append(colour)
+    if np.max(np.ptp(np.asarray(colours), axis=0)) > 25:
+        return None
+    top, left, bottom, right = found
+    # Verify the entire rectangle, not just the central projection.
+    bands = (pixels[top[0]:top[1], left[1]:width-right[1]],
+             pixels[height-bottom[1]:height-bottom[0], left[1]:width-right[1]],
+             pixels[top[1]:height-bottom[1], left[0]:left[1]],
+             pixels[top[1]:height-bottom[1], width-right[1]:width-right[0]])
+    for index, band in enumerate(bands):
+        if not band.size:
+            return None
+        matches = np.max(np.abs(band.astype(np.float32) - np.median(colours, axis=0)), axis=2) <= 25
+        if np.mean(np.any(matches, axis=0 if index < 2 else 1)) < .98:
+            return None
+    return left[1], top[1], width-right[1], height-bottom[1]
+
+
 def analyze_layout(image, *, texture_fill=False, composition_hint=None):
     if image.height > image.width:
         image = image.transpose(Image.Transpose.ROTATE_90)
@@ -406,7 +459,8 @@ def analyze_layout(image, *, texture_fill=False, composition_hint=None):
     floating = None
     if panel is None:
         floating = detect_floating_artwork(probe) or detect_neutral_background_artwork(probe)
-    if framed is None and floating is None and panel is None:
+    layered_depth = None
+    if framed is None and floating is None and (panel is None or panel.artwork is None):
         # Genuine border ornaments retain their complete band and inner margin.
         probe_depth = max(1, round(depth * probe.height / height))
         probe_left = max(0, round(left * probe.width / width))
@@ -416,7 +470,16 @@ def analyze_layout(image, *, texture_fill=False, composition_hint=None):
         # JPEG noise can have a tiny period on an otherwise flat frame.
         ornament_rows = np.max(np.std(frame_region.astype(np.float32), axis=1), axis=1) > 3
         has_ornament = np.count_nonzero(ornament_rows) >= max(2, len(frame_region) * .20)
-        if not outer_period or not has_ornament:
+        if outer_period and has_ornament:
+            bounds = (probe_left, probe_depth, probe_right, round(bottom * probe.height / height))
+            complete = _closed_textured_frame(detected, bounds)
+            if complete is not None:
+                panel = None
+                layered_depth = depth
+                ratios = (width / probe.width, height / probe.height) * 2
+                left, top, right, bottom = (round(value * ratio) for value, ratio in zip(complete, ratios))
+                depth = top
+        if panel is None and (not outer_period or not has_ornament):
             framed = detect_rectangular_artwork(image, (left, top, right, bottom))
         if framed is not None:
             left, top, right, bottom = (round(value) for value in framed.frame)
@@ -466,9 +529,13 @@ def analyze_layout(image, *, texture_fill=False, composition_hint=None):
     # Extract only the safe horizontal span. Side borders need not equal the top depth.
     safe_left, safe_right = min(left + 1, right - 1), max(left + 1, right - 1)
     region = _straight_outline_rows(pixels[:max(1, depth), safe_left:safe_right])
-    strip, period = extract_period(region)
+    periodic_region = region if layered_depth is None else region[:layered_depth]
+    strip, period = extract_period(periodic_region)
     if not period:
-        strip, period = extract_dark_period(region)
+        strip, period = extract_dark_period(periodic_region)
+    if layered_depth is not None:
+        strip = np.concatenate((strip, region[layered_depth:, :strip.shape[1]]), axis=0)
+    layered_strip = (layered_depth, region) if layered_depth is not None else None
     sentence = False
     layers = ()
     if not period:
@@ -496,6 +563,8 @@ def analyze_layout(image, *, texture_fill=False, composition_hint=None):
         message += '；满幅装饰带连续环绕'
     if floating is not None:
         message += '；独立图案留白类：完整图案组等比适配，保留原素材最小留白距离'
+    if layered_strip is not None:
+        message += '；内层织纹与细线完整随轮廓适配'
     gaps = _stripe_corner_gaps(pixels, strip, period)
     if gaps is not None:
         message += '；保留原条纹四角空隙'
@@ -504,4 +573,5 @@ def analyze_layout(image, *, texture_fill=False, composition_hint=None):
     if framed is not None:
         message += '；中央画框等比适配，保留原装饰背景及最小间距'
     return SourceLayout(pixels, strip, depth, width, height, message, content,
-                        (left, top, right, bottom), period, sentence, layers, floating, panel, gaps, framed)
+                        (left, top, right, bottom), period, sentence, layers, floating, panel, gaps, framed,
+                        layered_strip=layered_strip)
