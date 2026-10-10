@@ -301,6 +301,38 @@ def _texture_layout(pixels):
                         content, (left, top, right, bottom), texture_fill=True)
 
 
+def _closed_thin_frame(pixels):
+    """Prove a near-edge rectangular stroke before correcting scan overshoot."""
+    height, width = pixels.shape[:2]
+    dark = np.max(pixels, axis=2) < 80
+
+    def inner_stroke(mask):
+        h, w = mask.shape
+        limit = max(3, round(h * .12))
+        rows = np.mean(mask[:limit, round(w * .30):round(w * .70)], axis=1) > .98
+        changes = np.diff(np.r_[False, rows, False].astype(np.int8))
+        starts, ends = np.flatnonzero(changes == 1), np.flatnonzero(changes == -1)
+        # A stroke touching the search limit has no proven end: it may be
+        # a wide colour band truncated by the recognition window.
+        runs = [(int(a), int(b)) for a, b in zip(starts, ends)
+                if 0 < a < b < limit and
+                b - a <= max(3, round(min(height, width) * .015))]
+        return runs[-1] if runs else None
+
+    strokes = (inner_stroke(dark), inner_stroke(dark[::-1]),
+               inner_stroke(dark.T), inner_stroke(dark[:, ::-1].T))
+    if any(stroke is None for stroke in strokes):
+        return None
+    (t0, t1), (b0, b1), (l0, l1), (r0, r1) = strokes
+    # Projection peaks alone are insufficient: verify every side all the way
+    # to both corners. Sparse flowers and dotted borders cannot prove a frame.
+    sides = (dark[t0:t1, l1:width-r1], dark[height-b1:height-b0, l1:width-r1],
+             dark[t1:height-b1, l0:l1].T, dark[t1:height-b1, width-r1:width-r0].T)
+    if any(not side.size or np.max(np.mean(side, axis=1)) < .98 for side in sides):
+        return None
+    return l1, t1, width - r1, height - b1
+
+
 def analyze_layout(image, *, texture_fill=False, composition_hint=None):
     if image.height > image.width:
         image = image.transpose(Image.Transpose.ROTATE_90)
@@ -357,6 +389,16 @@ def analyze_layout(image, *, texture_fill=False, composition_hint=None):
     left = edge(pixels.transpose(1, 0, 2), detected.transpose(1, 0, 2))
     right = width - edge(pixels[:, ::-1].transpose(1, 0, 2), detected[:, ::-1].transpose(1, 0, 2))
     top = depth
+    frame = _closed_thin_frame(detected)
+    if frame is not None:
+        ratios = (width / probe.width, height / probe.height) * 2
+        frame = tuple(round(value * ratio) for value, ratio in zip(frame, ratios))
+        # Preserve established ornament/sentence scans. Intervene only when
+        # the scan has crossed far beyond a proven complete thin rectangle.
+        overshoot = (left - frame[0], top - frame[1], frame[2] - right, frame[3] - bottom)
+        if max(overshoot) > min(width, height) * .12:
+            left, top, right, bottom = frame
+            depth = top
     framed = detect_framed_artwork(image, (left, top, right, bottom))
     if framed is not None:
         left, top, right, bottom = (round(value) for value in framed.frame)

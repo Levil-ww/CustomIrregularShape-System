@@ -105,6 +105,14 @@ def detect_floating_artwork(image):
             foreground[b:d, clean_left:a], foreground[b:d, c:clean_right])
     if any(not strip.size or np.mean(strip) > .10 for strip in moat):
         return None
+    # Pale full-span patterns can be invisible to the component threshold.
+    # A gallery moat must also be quiet at low contrast; inspect the same
+    # stroke-free strips so thin frames do not masquerade as texture.
+    faint = np.max(np.abs(pixels.astype(np.float32) - background), axis=2) > 8
+    faint_moat = (faint[clean_top:b, a:c], faint[d:clean_bottom, a:c],
+                  faint[b:d, clean_left:a], faint[b:d, c:clean_right])
+    if any(np.mean(strip) > .15 for strip in faint_moat):
+        return None
     ratios = (image.width / width, image.height / height) * 2
     bounds = tuple(value * ratio for value, ratio in zip(bounds, ratios))
     frame = tuple(value * ratio for value, ratio in zip(frame, ratios))
