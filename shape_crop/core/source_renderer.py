@@ -4,6 +4,7 @@ from PIL import Image
 from shape_crop.core.geometry import create_shape, inset_boundary_fraction, _compute_depth_and_radial, CircularBand
 from shape_crop.core.sampling import sample_perimeter_strip, sample_sentence_strip, uniform_strip_band, sample
 from shape_crop.core.content_mapping import ContentMapping
+from shape_crop.core.round_rings import recognize_round_ring, sample_round_rings
 from shape_crop.core.framed_artwork_mapping import sample_framed_artwork
 from shape_crop.core.panel_mapping import adapt_panel
 from shape_crop.core.floral_mapping import sample_patterned_inset, corner_transforms, sample_corner_composition
@@ -55,6 +56,17 @@ def render_source(design, material, inner_material=None, max_side=None, progress
             ring_depth += extra_cm
     ring_depth = min(ring_depth, shape.half_height - 1e-6) if border_cm else 0.0
     ring = shape.inset(ring_depth) if border_cm else shape
+    round_ring = (recognize_round_ring(layout.strip)
+                  if layout.strip_period_px and not layout.strip_is_sentence and layout.corner_gaps is None else None)
+    # Near-full circles can leave a straight shorter than adjacent glyphs.
+    # Keep the established mapping rather than introduce colliding endpoint rings.
+    if round_ring is not None and 1e-8 < ring.chord < 2 * round_ring[4] * scale:
+        round_ring = None
+    if round_ring is not None:
+        glyph_depth = round_ring[3] * scale
+        if plain_band and round_ring[3] >= plain_band[1]:
+            glyph_depth += extra_cm
+        ring = shape.inset(min(glyph_depth, shape.half_height - 1e-6))
     strip_width = layout.strip.shape[1]
     origin = (strip_width - ring.chord / scale) / 2
     x = ((np.arange(width, dtype=np.float32) + .5) / width - .5)[None, :] * design.diameter_cm
@@ -116,6 +128,9 @@ def render_source(design, material, inner_material=None, max_side=None, progress
             else:
                 stripe = sample_perimeter_strip(layout.strip, s, sample_depth,
                                                  ring.perimeter, scale, origin)
+            if round_ring is not None:
+                stripe = sample_round_rings(round_ring, ring, scale, x[0, columns],
+                    y[rows, 0], sample_depth, stripe)
             if layout.corner_gaps is not None:
                 gap_start, gap_end, colours = layout.corner_gaps
                 band = (sample_depth >= gap_start - .5) & (sample_depth < gap_end - .5)
