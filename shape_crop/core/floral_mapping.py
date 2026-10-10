@@ -34,6 +34,8 @@ def corner_transforms(layout,shape,scale):
             extent=getattr(shape,'center',0.)+np.sqrt(max(0.,shape.radius**2-yy**2))
             reach=(columns[-1]-(width-1)/2)*fit if group.anchor=='top_right' else ((width-1)/2-columns[0])*fit
             offsets.append(extent-reach)
+        if not offsets:
+            continue
         cx=max(0.,min(offsets)-.25)
         if group.anchor=='bottom_left': cx=-cx
         transforms.append((group,fit,cx,cy))

@@ -73,7 +73,14 @@ def associate_dimensions(words, width, height):
 def recognize_sketch(path, cancelled=None):
     if os.name != 'nt':
         raise ValueError('自动识别使用 Windows 系统 OCR；当前平台请手工输入草图尺寸。')
-    image = ImageOps.exif_transpose(Image.open(path)).convert('RGB')
+    try:
+        image = ImageOps.exif_transpose(Image.open(path)).convert('RGB')
+    except FileNotFoundError:
+        raise ValueError(f'草图文件不存在：{path}')
+    except PermissionError:
+        raise ValueError(f'草图文件无权限：{path}')
+    except Exception:
+        raise ValueError('草图文件无法识别为图片，请检查格式')
     image.thumbnail((2400, 2400))
     pixels = np.asarray(image).astype(np.int16)
     red = ((pixels[..., 0] > 170) & (pixels[..., 1] < 150) &
@@ -95,9 +102,12 @@ def recognize_sketch(path, cancelled=None):
                 variant = variant.resize(tuple(round(n * ratio) for n in variant.size), Image.Resampling.LANCZOS)
             prepared = str(Path(directory) / f'ocr-{index}.png')
             variant.save(prepared)
-            result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy',
-                                     'Bypass', '-File', script, '-ImagePath', prepared],
-                                    capture_output=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
+            try:
+                result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy',
+                                         'Bypass', '-File', script, '-ImagePath', prepared],
+                                        capture_output=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
+            except subprocess.TimeoutExpired:
+                raise ValueError('Windows OCR 超时（45 秒），请手工填写尺寸')
             if result.returncode:
                 raise ValueError('Windows OCR 不可用，请手工填写尺寸。' + result.stderr.decode('utf-8', errors='replace')[-500:])
             try:

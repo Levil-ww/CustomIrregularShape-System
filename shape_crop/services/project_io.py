@@ -21,9 +21,18 @@ def save_project(path, design):
 
 def load_project(path):
     path = Path(path)
-    raw = json.loads(path.read_text(encoding='utf-8'))
+    try:
+        raw = json.loads(path.read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        raise ValueError(f'项目文件不存在：{path}')
+    except PermissionError:
+        raise ValueError(f'项目文件无权限：{path}')
+    except json.JSONDecodeError:
+        raise ValueError(f'项目文件格式损坏：{path}')
     if raw.get('schema_version') != 1:
         raise ValueError('不支持的项目文件版本')
+    if 'design' not in raw:
+        raise ValueError('项目文件缺少设计数据')
     data = raw['design']
     for key in ('material', 'inner_material'):
         if data.get(key) is not None:

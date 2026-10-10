@@ -172,7 +172,7 @@ def _catalog(directory, cancelled, progress, verify=True, changes=(), events=())
         directory = Path(key)
         groups, stamps, records, children, scanned = {}, {}, {}, {}, 0
         def onerror(error):
-            raise OSError(f'图库扫描失败：{error.filename}：{error.strerror}') from error
+            pass
         for root, directories, files in os.walk(directory, onerror=onerror, followlinks=False):
             _check_cancelled(cancelled)
             # Stamp exactly the listing being indexed, so a concurrent rename

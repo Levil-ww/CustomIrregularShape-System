@@ -17,6 +17,8 @@ def save_image(image, path, dpi):
             # PNG remains lossless; lower compression spends less time encoding.
             image.save(temporary, format='PNG', compress_level=1, dpi=(dpi, dpi))
         else:
+            if image.mode != 'RGBA':
+                image = image.convert('RGBA')
             flat = Image.new('RGB', image.size, 'white')
             flat.paste(image, mask=image.getchannel('A'))
             flat.save(temporary, format='JPEG', quality=95, subsampling=0, dpi=(dpi, dpi))

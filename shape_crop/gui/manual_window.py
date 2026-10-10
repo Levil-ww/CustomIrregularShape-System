@@ -297,6 +297,14 @@ class ManualWindow(QMainWindow):
             self.dimensions.setStyleSheet('color: #bb3535;')
 
     def start_preview(self):
+        try:
+            spec = self.snapshot()
+            width, height = spec.pixel_size()
+            if width * height > MAX_PIXEL_COUNT:
+                raise ValueError('预览超过 1.8 亿像素，请降低 DPI 或尺寸')
+        except ValueError as error:
+            self.show_error(str(error))
+            return
         self.start_task(True)
 
     def start_export(self):
