@@ -1,7 +1,7 @@
 """Preserve source frames and uniformly fit artwork according to its visual layout."""
 import numpy as np
 from PIL import Image
-from shape_crop.core.geometry import create_shape, inset_boundary_fraction, _compute_depth_and_radial
+from shape_crop.core.geometry import create_shape, inset_boundary_fraction, _compute_depth_and_radial, CircularBand
 from shape_crop.core.sampling import sample_perimeter_strip, sample_sentence_strip, uniform_strip_band, sample
 from shape_crop.core.content_mapping import ContentMapping
 from shape_crop.core.framed_artwork_mapping import sample_framed_artwork
@@ -61,6 +61,16 @@ def render_source(design, material, inner_material=None, max_side=None, progress
     x_sq = x * x
     output = Image.new('RGBA', (width, height))
     flowers = corner_transforms(layout, shape, scale) if layout.corner_composition is not None else None
+    inner_shape = None
+    inner_flowers = None
+    if design.inner_diameter_cm:
+        selected_layout = (inner_material or material).source_layout
+        if selected_layout is not None and (selected_layout.patterned_inset is not None or
+                                            selected_layout.corner_composition is not None):
+            inner_shape = CircularBand(design.inner_diameter_cm, design.inner_diameter_cm)
+            composition_scale = ContentMapping.source_scale(selected_layout, inner_shape.diameter, inner_shape.height)
+            if selected_layout.corner_composition is not None:
+                inner_flowers = corner_transforms(selected_layout, inner_shape, composition_scale)
     def cov(value):
         return np.clip(value / px_cm + .5, 0, 1)
     for start in range(0, height, block_rows):
@@ -125,7 +135,13 @@ def render_source(design, material, inner_material=None, max_side=None, progress
                 raise ValueError('自动排版的内圆素材也需采用自动模式')
             inner_depth = radius - radial
             inner_scale = mapping.scale_cm if layout.texture_fill else scale
-            if inner_layout.texture_fill:
+            if inner_shape is not None:
+                inner_scale = composition_scale
+                inner_band = inner_layout.border_depth_px * inner_scale
+                inner_mapping = ContentMapping(inner_scale, (inner_layout.width_px - 1) / 2,
+                                               (inner_layout.height_px - 1) / 2,
+                                               inner_layout.content_box_px[0], inner_layout.content_box_px[1])
+            elif inner_layout.texture_fill:
                 inner_scale = min(2 * radius / inner_layout.width_px,
                                   2 * radius / inner_layout.height_px)
                 inner_band = min(inner_layout.border_depth_px * inner_scale, .20) or .05
@@ -135,7 +151,13 @@ def render_source(design, material, inner_material=None, max_side=None, progress
                                                (inner_layout.height_px - 1) / 2,
                                                inner_layout.content_box_px[0], inner_layout.content_box_px[1])
                 inner_band = inner_layout.border_depth_px * inner_scale
-            content = inner_mapping.sample(inner_layout, x, y)
+            if inner_layout.patterned_inset is not None:
+                content = sample_patterned_inset(inner_layout, inner_mapping, inner_shape, inner_band, x, y, px_cm)
+            elif inner_layout.corner_composition is not None:
+                content = np.empty(np.broadcast_shapes(x.shape, y.shape) + (3,), dtype=np.uint8)
+                content[:] = inner_layout.corner_composition.background
+            else:
+                content = inner_mapping.sample(inner_layout, x, y)
             if inner_band >= radius:
                 raise ValueError('内圆尺寸小于原素材边框宽度')
             if inner_band:
@@ -145,6 +167,8 @@ def render_source(design, material, inner_material=None, max_side=None, progress
                                                 np.maximum(0, inner_depth / inner_scale - .5),
                                                 inner_perimeter, inner_scale)
                 blend(content, stripe, cov(inner_band - inner_depth))
+            if inner_flowers is not None:
+                content = sample_corner_composition(inner_layout, inner_flowers, inner_scale, x, y, content)
             blend(rgb, content, cov(inner_depth))
         alpha = np.round(cov(depth) * 255).astype(np.uint8)
         output.paste(Image.fromarray(np.concatenate((rgb, alpha[..., None]), axis=2)), (0, start))

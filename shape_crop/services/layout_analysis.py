@@ -6,6 +6,7 @@ from shape_crop.services.texture_period import extract_period, extract_dark_peri
 from shape_crop.services.floating_artwork import (detect_floating_artwork,
     detect_contrasting_artwork, detect_neutral_background_artwork)
 from shape_crop.services.inset_panel import detect_inset_panel
+from shape_crop.services.floral_composition import detect_patterned_inset, detect_corner_composition
 from shape_crop.services.framed_artwork import detect_framed_artwork, detect_rectangular_artwork
 
 
@@ -27,10 +28,16 @@ class SourceLayout:
     corner_gaps: object = None
     framed_artwork: object = None
     texture_fill: bool = False
+    patterned_inset: object = None
+    corner_composition: object = None
 
     @property
     def category(self):
         """Classify the prepared visual layout for user-facing descriptions."""
+        if self.patterned_inset is not None:
+            return '中央花纹内框类'
+        if self.corner_composition is not None:
+            return '角落花组独立排版类'
         if self.texture_fill:
             return '满铺纹理细线类'
         if self.framed_artwork is not None:
@@ -294,13 +301,27 @@ def _texture_layout(pixels):
                         content, (left, top, right, bottom), texture_fill=True)
 
 
-def analyze_layout(image, *, texture_fill=False):
+def analyze_layout(image, *, texture_fill=False, composition_hint=None):
     if image.height > image.width:
         image = image.transpose(Image.Transpose.ROTATE_90)
     pixels = np.asarray(image)
     height, width = pixels.shape[:2]
     if texture_fill:
         return _texture_layout(pixels)
+    if composition_hint:
+        detected = (detect_patterned_inset(image) if composition_hint == 'patterned_inset'
+                    else detect_corner_composition(image))
+        if detected is not None:
+            composition, frame = detected[:2]
+            left, top, right, bottom = frame
+            region = (detected[2] if len(detected) == 3 else
+                      pixels[:max(1, top), left + 1:right - 1])
+            strip, period = extract_period(_straight_outline_rows(region))
+            kwargs = {composition_hint: composition}
+            report = ('中央花纹随内侧轮廓等比满铺，保留原留白与边框' if composition_hint == 'patterned_inset'
+                      else '角落花组完整等比适配，中间英文独立居中，保留原圆点边框')
+            return SourceLayout(pixels, strip, top, width, height, report,
+                                pixels[top:bottom, left:right], frame, period, **kwargs)
     # Scan at a bounded spatial scale. At print resolution thin floral strokes
     # leave many individually flat rows and can delay the transition by thousands
     # of pixels. Only recognition is reduced; all extracted pixels stay original.

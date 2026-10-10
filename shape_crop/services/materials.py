@@ -88,6 +88,8 @@ def prepare(material, preview=False):
         arrays.extend((result.source_layout.image, result.source_layout.content))
         if result.source_layout.framed_artwork is not None:
             arrays.append(result.source_layout.framed_artwork.tile)
+        if result.source_layout.corner_composition is not None:
+            arrays.extend(group.alpha for group in result.source_layout.corner_composition.groups)
         arrays.extend(entry[0] for entry in result.source_layout.sentence_layers if entry is not None)
     arrays = {id(array): array for array in arrays}.values()
     size = 0
@@ -130,7 +132,11 @@ def _prepare(material, preview):
         # Plain colour marble has veins all the way to a single black outline.
         # Crowned/framed marble designs must keep normal structural analysis.
         texture_fill = bool(re.fullmatch(r'(?:浅|深)?(?:白|灰|黑|褐|棕|米|黄|绿|蓝|红|粉)(?:色)?大理石\d*(?:号)?(?:方形)?', pattern))
-        layout = analyze_layout(image, texture_fill=True) if texture_fill else analyze_layout(image)
+        hint = {'素缕花肆': 'patterned_inset', '花漾之约': 'corner_composition'}.get(pattern)
+        if hint:
+            layout = analyze_layout(image, composition_hint=hint)
+        else:
+            layout = analyze_layout(image, texture_fill=True) if texture_fill else analyze_layout(image)
         return PreparedMaterial(layout.image, layout.strip, material, layout)
     content = extract(image, material.content_box)
     strip = extract(image, material.strip_box)
