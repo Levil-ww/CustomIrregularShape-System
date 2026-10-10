@@ -136,5 +136,6 @@ class CatalogSession:
             with self._lock:
                 self._active = False
                 self._handle = None
+                self._kernel = None
                 self._thread = None
                 kernel.CloseHandle(handle)

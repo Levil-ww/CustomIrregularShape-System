@@ -348,7 +348,6 @@ class MainWindow(QMainWindow):
         if min(self.width_value.value(), self.height_value.value()) <= 0:
             raise ValueError('请填写最大宽度和总高')
         if self.shape_mode.currentData() == 'arc':
-            ArcBand(self.width_value.value(), self.height_value.value(), self.straight_value.value())
             return ArcBand(w, h, self.straight_value.value())
         return CircularBand(w, h)
 
