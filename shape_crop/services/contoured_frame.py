@@ -3,6 +3,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 from PIL import Image
 from shape_crop.services.texture_period import extract_period, extract_dark_period
+from shape_crop.services.layout_analysis import analyze_layout
 
 
 @dataclass(frozen=True)
@@ -10,6 +11,40 @@ class ContouredFrame:
     box: tuple
     stroke: np.ndarray
     inset_px: float
+
+
+def adapt_texture_inset(layout):
+    """Curve a verified texture rectangle while keeping its fill uniformly scaled."""
+    artwork = layout.framed_artwork
+    if artwork is None and max(layout.width_px, layout.height_px) > 2400:
+        # Native JPEG noise can hide a repeat accepted at preview resolution.
+        # Recheck structure at the same bounded size, then keep native pixels.
+        probe = Image.fromarray(layout.image)
+        probe.thumbnail((2400, 2400), Image.Resampling.LANCZOS)
+        recognized = analyze_layout(probe).framed_artwork
+        if recognized is not None:
+            sx, sy = layout.width_px / probe.width, layout.height_px / probe.height
+            ox, oy = (round(v * r) for v, r in zip(recognized.origin, (sx, sy)))
+            h, w = recognized.tile.shape[:2]
+            tile = (recognized.tile if recognized.background_colour is not None else
+                    layout.image[oy:oy + max(1, round(h * sy)), ox:ox + max(1, round(w * sx))])
+            artwork = replace(recognized,
+                box=tuple(v * r for v, r in zip(recognized.box, (sx, sy, sx, sy))),
+                frame=tuple(v * r for v, r in zip(recognized.frame, (sx, sy, sx, sy))),
+                origin=(ox, oy), tile=tile)
+            layout = replace(layout, framed_artwork=artwork)
+    if artwork is None:
+        return layout
+    box = tuple(round(value) for value in artwork.box)
+    left, top, right, bottom = box
+    if not (0 < left < right < layout.width_px and 0 < top < bottom < layout.height_px):
+        return layout
+    inset = (top + layout.height_px - bottom) / 2
+    # These textures meet without an inner outline. An empty stroke preserves
+    # their original boundary instead of inventing a line from the fill.
+    frame = ContouredFrame(box, np.empty((0, 1, 3), dtype=np.uint8), inset)
+    return replace(layout, contoured_frame=frame,
+        report=layout.report + '；中央纹理随轮廓满铺，保留浅色外层间距与纹理比例')
 
 
 def adapt_contoured_frame(layout):

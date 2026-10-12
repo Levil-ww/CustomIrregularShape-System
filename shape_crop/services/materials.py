@@ -9,7 +9,7 @@ from PIL import Image, ImageOps
 from shape_crop.models.design import MaterialSpec
 from shape_crop.services.layout_analysis import analyze_layout
 from shape_crop.services.filename_parser import parse_filename
-from shape_crop.services.contoured_frame import adapt_contoured_frame
+from shape_crop.services.contoured_frame import adapt_contoured_frame, adapt_texture_inset
 
 
 @dataclass(frozen=True)
@@ -144,6 +144,8 @@ def _prepare(material, preview):
             layout = analyze_layout(image, texture_fill=True) if texture_fill else analyze_layout(image)
         if pattern == '哥特玫瑰':
             layout = adapt_contoured_frame(layout)
+        elif re.fullmatch(r'闲叙[·・.\s]*(?:青釉|邂逅)', pattern):
+            layout = adapt_texture_inset(layout)
         return PreparedMaterial(layout.image, layout.strip, material, layout)
     content = extract(image, material.content_box)
     strip = extract(image, material.strip_box)

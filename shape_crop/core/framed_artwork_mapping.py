@@ -40,7 +40,8 @@ def sample_contoured_frame(layout, shape, native_scale, border_cm, x, y, pixel_c
     picture=layout.image[b:d,a:c]
     flowers=sample(picture,x/scale+(c-a-1)/2,y/scale+(d-b-1)/2)
     blend(result,flowers,np.clip((depth-thickness)/pixel_cm+.5,0,1))
-    stroke=sample(frame.stroke,np.zeros_like(depth),depth/native_scale-.5)
-    coverage=np.clip(depth/pixel_cm+.5,0,1)*np.clip((thickness-depth)/pixel_cm+.5,0,1)
-    blend(result,stroke,coverage)
+    if thickness:
+        stroke=sample(frame.stroke,np.zeros_like(depth),depth/native_scale-.5)
+        coverage=np.clip(depth/pixel_cm+.5,0,1)*np.clip((thickness-depth)/pixel_cm+.5,0,1)
+        blend(result,stroke,coverage)
     return result
