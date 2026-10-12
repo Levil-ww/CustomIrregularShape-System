@@ -44,7 +44,7 @@ class ShapePreview(QWidget):
         painter.drawPath(path)
         painter.setPen(QColor('#333333'))
         painter.drawText(0, 0, self.width(), 25, Qt.AlignCenter, f'W 最大宽度 {shape.diameter:g}cm')
-        painter.drawText(0, self.height() - 25, self.width(), 25, Qt.AlignCenter, f'L 直边 {shape.chord:.3f}cm')
+        painter.drawText(0, self.height() - 25, self.width(), 25, Qt.AlignCenter, f'L 直边 {shape.chord:.2f}cm')
         painter.save()
         painter.translate(15, self.height() / 2)
         painter.rotate(-90)
