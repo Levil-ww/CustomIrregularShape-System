@@ -192,6 +192,10 @@ def inset_boundary_fraction(shape, x, y, depth, reference=None):
     theta = np.arctan2(y, np.abs(x) - center)
     radial_depth = shape.radius - np.hypot(np.abs(x) - center, y)
     on_line = shape.half_height - np.abs(y) <= radial_depth
+    if isinstance(shape, ArcBand):
+        # Behind a side arc's centre, the supporting circle is not part of
+        # the contour. Its finite endpoints are farther than the straight edge.
+        on_line |= np.abs(x) <= center
     line_x = np.clip(x, -chord / 2, chord / 2)
     top = line_x + ref_chord / 2
     bottom = ref_chord + ref_arc + ref_chord / 2 - line_x
