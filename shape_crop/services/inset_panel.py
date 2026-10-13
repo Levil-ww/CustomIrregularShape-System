@@ -1,12 +1,17 @@
 """Recognize closed translucent or pale inset panels over full-span artwork."""
 from dataclasses import dataclass
 import numpy as np
+from shape_crop.services.texture_period import extract_period
 
 
 @dataclass(frozen=True)
 class InsetPanel:
     box: tuple
     artwork: object = None
+    translucent: object = None
+    translucent_levels: object = None
+    stroke_repeat_px: float = 0
+    partial_fade_edges: tuple = ()
 
 
 def _detect_translucent_panel(image):
@@ -45,7 +50,96 @@ def _detect_translucent_panel(image):
         return None
     ratios = (image.width / w, image.height / h) * 2
     box = tuple(v * r for v, r in zip((left, top, right, bottom), ratios))
-    return InsetPanel(box)
+    stroke = max(len(tops[0]), len(bottoms[0]), 1)
+    colour = np.median(pixels[top:top + stroke, int(w * .35):int(w * .65)].reshape(-1, 3), axis=0)
+    clear = np.percentile(inner.reshape(-1, 3), 95, axis=0)
+    # The flattened fade may extend beyond its fine outline. Find that
+    # connected rectangular region on the source, independently of output
+    # dimensions. Clear dark ink ends the region; blank background alone
+    # does not establish an extension.
+    bounds = [left, top, right, bottom]
+    margin = round(min(h, w)*.06)
+    for axis, edge, direction, index in ((1,left,-1,0), (0,top,-1,1),
+                                        (1,right,1,2), (0,bottom,1,3)):
+        for distance in range(stroke+2, margin+1):
+            position = edge + direction*distance
+            if not 0 <= position < (w if axis else h):
+                break
+            band = pixels[top+4:bottom-3, position] if axis else pixels[position, left+4:right-3]
+            if np.any(np.percentile(band, 5, axis=0) < faded-8):
+                break
+            ink = np.max(np.abs(band-faded), axis=1) <= 8
+            if np.mean(ink) >= .015:
+                bounds[index] = position
+    fade_bounds = [value*ratio for value, ratio in zip(bounds, ratios)]
+    # Resolve the last resampled edge in source pixels. A one-probe-pixel
+    # error leaves a visible pale stripe after contrast restoration.
+    for axis, direction, index in ((1,-1,0), (0,-1,1), (1,1,2), (0,1,3)):
+        edge = round(fade_bounds[index])
+        for distance in range(0, max(2, int(np.ceil(max(ratios)*2)))+1):
+            position = edge + direction*distance
+            if not 0 <= position < (image.width if axis else image.height):
+                break
+            region = ((position, round(box[1])+4, position+1, round(box[3])-3)
+                      if axis else (round(box[0])+4, position, round(box[2])-3, position+1))
+            band = np.asarray(image.crop(region)).reshape(-1, 3).astype(np.float32)
+            if np.any(np.percentile(band, 5, axis=0) < faded-8):
+                break
+            if np.mean(np.max(np.abs(band-faded), axis=1) <= 8) >= .015:
+                fade_bounds[index] = position
+    fade_box = tuple(fade_bounds)
+    translucent = (fade_box, opacity, tuple(background), stroke * max(ratios), tuple(colour))
+    upper = pixels[round(h*.06):max(round(h*.06), round(fade_bounds[1]/ratios[1])-4),
+                   round(w*.1):round(w*.9)].astype(np.uint8)
+    repeat = extract_period(upper, max_period_fraction=.75)[1] if min(upper.shape[:2]) >= 3 else 0
+    return InsetPanel(box, translucent=translucent, translucent_levels=(tuple(faded), tuple(clear)),
+                      stroke_repeat_px=repeat*ratios[0],
+                      partial_fade_edges=_partial_fade_edges(image, fade_box, box, background, faded))
+
+
+def _partial_fade_edges(image, fade_box, outline_box, background, dark):
+    """Measure connected partial-opacity source pixels outside the closed fade."""
+    pil = hasattr(image, 'crop')
+    width, height = (image.width,image.height) if pil else (image.shape[1],image.shape[0])
+    background = np.asarray(background, dtype=np.float32)
+    active = background > 32
+    if not np.any(active):
+        return ()
+    opacity = float(np.median(np.asarray(dark)[active]/background[active]))
+    left, top, right, bottom = outline_box
+    result = []
+    extent = max(3, int(np.ceil(max(width,height)/1200))*2)
+    for axis, edge, direction in ((1,fade_box[0],-1), (0,fade_box[1],-1),
+                                  (1,fade_box[2],1), (0,fade_box[3],1)):
+        start = int(np.ceil(edge)-1) if direction < 0 else int(np.floor(edge)+1)
+        lo, hi = (round(top)+4,round(bottom)-3) if axis else (round(left)+4,round(right)-3)
+        candidates = []
+        partial = False
+        for distance in range(extent):
+            position = start + direction*distance
+            if not 0 <= position < (width if axis else height):
+                break
+            region = (position,lo,position+1,hi) if axis else (lo,position,hi,position+1)
+            band = (np.asarray(image.crop(region)) if pil else image[region[1]:region[3],region[0]:region[2]])
+            band = band.reshape(-1,3).astype(np.float32)
+            floor = np.percentile(band,5,axis=0)
+            alpha = floor[active]/background[active]
+            # A connected, shared-colour fade differs from isolated grey ink.
+            strength = float(np.median(alpha))
+            if not .01 < strength < .995 or np.ptp(alpha) > .04:
+                break
+            if np.mean(np.max(np.abs(band-floor),axis=1) <= 8) < .04:
+                break
+            apply_lo, apply_hi = (int(np.floor(fade_box[1])),int(np.ceil(fade_box[3]))+1) if axis else (
+                int(np.floor(fade_box[0])),int(np.ceil(fade_box[2]))+1)
+            partial |= strength < opacity-.02
+            candidates.append((axis,position,apply_lo,apply_hi,tuple(float(value) for value in floor)))
+        # JPEG ringing can make the first transition row nearly opaque.
+        # Admit it only with a connected weaker fade farther out, not merely
+        # because an isolated natural pale detail resembles the background.
+        if partial:
+            result.extend(candidates)
+    return tuple(result)
 
 
 def _detect_pale_panel(image):

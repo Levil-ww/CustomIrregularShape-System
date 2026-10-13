@@ -13,7 +13,7 @@ def extract_dark_period(strip):
     return strip[:, start:start + period].copy(), period
 
 
-def extract_period(strip):
+def extract_period(strip, max_period_fraction=None):
     height, width = strip.shape[:2]
     if width < 12:
         return strip.copy(), 0
@@ -43,10 +43,12 @@ def extract_period(strip):
     fft = np.fft.rfft(signal, n=2 * n)
     correlation = np.fft.irfft(fft * fft.conj(), n=2 * n)[:n]
     correlation /= np.arange(n, 0, -1) * variance
-    for lag in range(2, max(2, n // 3)):
+    limit = n // 3 if max_period_fraction is None else min(n-1, int(n*max_period_fraction))
+    max_period = width // 3 if max_period_fraction is None else int(width*max_period_fraction)
+    for lag in range(2, max(2, limit)):
         if correlation[lag] < .90 or not (correlation[lag] > correlation[lag - 1] and correlation[lag] >= correlation[lag + 1]):
             continue
-        candidates = range(max(3, lag * stride - stride), min(width // 3, lag * stride + stride) + 1)
+        candidates = range(max(3, lag * stride - stride), min(max_period, lag * stride + stride) + 1)
         errors = [(float(np.mean((signature[p:] - signature[:-p])**2)), p) for p in candidates]
         if not errors:
             continue

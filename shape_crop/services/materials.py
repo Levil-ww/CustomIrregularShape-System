@@ -1,5 +1,5 @@
 """File I/O and source-region extraction; no UI dependencies."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from collections import OrderedDict
 from threading import RLock
@@ -7,7 +7,9 @@ import re
 import numpy as np
 from PIL import Image, ImageOps
 from shape_crop.models.design import MaterialSpec
-from shape_crop.services.layout_analysis import analyze_layout
+from shape_crop.services.layout_analysis import analyze_layout, _straight_outline_rows
+from shape_crop.services.texture_period import extract_period
+from shape_crop.services.inset_panel import _partial_fade_edges
 from shape_crop.services.filename_parser import parse_filename
 from shape_crop.services.contoured_frame import adapt_contoured_frame, adapt_texture_inset
 
@@ -142,6 +144,10 @@ def _prepare(material, preview):
             layout = analyze_layout(image, composition_hint=hint)
         else:
             layout = analyze_layout(image, texture_fill=True) if texture_fill else analyze_layout(image)
+        if (not preview and max(image.size) > PREVIEW_SOURCE_SIDE and
+                layout.inset_panel is not None and layout.inset_panel.translucent is not None):
+            reference = analyze_layout(load_image(material.path, PREVIEW_SOURCE_SIDE))
+            layout = _align_translucent_layout(layout, reference)
         if pattern == '哥特玫瑰':
             layout = adapt_contoured_frame(layout)
         elif re.fullmatch(r'闲叙[·・.\s]*(?:青釉|邂逅)', pattern):
@@ -153,3 +159,49 @@ def _prepare(material, preview):
         content.thumbnail((1800, 1800), Image.Resampling.LANCZOS)
         strip.thumbnail((1800, 500), Image.Resampling.LANCZOS)
     return PreparedMaterial(np.asarray(content), np.asarray(strip), material)
+
+
+def _align_translucent_layout(layout, reference):
+    """Use preview structure for the same translucent source, retaining native ink."""
+    panel = reference.inset_panel
+    if panel is None or panel.translucent is None:
+        return layout
+    # Sentence ink and split/gapped strips have associated anchors and masks.
+    # Keep their established preparation rather than reread ink into the base.
+    if any(item.strip_is_sentence or item.corner_gaps is not None or item.layered_strip is not None
+           for item in (layout, reference)):
+        return layout
+    sx, sy = layout.width_px/reference.width_px, layout.height_px/reference.height_px
+    def box(values):
+        return tuple(v*r for v, r in zip(values, (sx, sy, sx, sy)))
+    bounds = tuple(round(v) for v in box(reference.content_box_px))
+    left, top, right, bottom = bounds
+    depth = round(reference.border_depth_px*sy)
+    region = _straight_outline_rows(layout.image[:max(1, depth), left+1:right-1])
+    strip, period = extract_period(region)
+    if not period and reference.strip_period_px:
+        period = max(1, round(reference.strip_period_px*sx))
+        start = max(0, (region.shape[1]-period)//2)
+        strip = region[:, start:start+period].copy()
+    fade, opacity, background, thickness, colour = panel.translucent
+    native_panel = layout.inset_panel
+    native_fade = (native_panel.translucent[0] if native_panel is not None and
+                   native_panel.translucent is not None else box(fade))
+    native_thickness = thickness*max(sx,sy)
+    panel_bounds = box(panel.box)
+    # JPEG preview filtering can underestimate a solid native outline by a
+    # few pixels. Measure its horizontal runs before interpolating over it,
+    # so the interpolation endpoints cannot sample the old black stroke.
+    centre_left, centre_right = round(layout.width_px*.35), round(layout.width_px*.65)
+    for edge in (panel_bounds[1], panel_bounds[3]):
+        lo = max(0, round(edge-4*native_thickness))
+        hi = min(layout.height_px, round(edge+4*native_thickness)+1)
+        dark_rows = np.mean(np.max(layout.image[lo:hi,centre_left:centre_right], axis=2) < 90, axis=1) > .95
+        native_thickness = max(native_thickness, float(np.count_nonzero(dark_rows)+2))
+    panel = replace(panel, box=box(panel.box),
+        translucent=(native_fade, opacity, background, native_thickness, colour),
+        stroke_repeat_px=panel.stroke_repeat_px*sx,
+        partial_fade_edges=_partial_fade_edges(layout.image,native_fade,panel_bounds,
+                                             background,panel.translucent_levels[0]))
+    return replace(layout, content_box_px=bounds, border_depth_px=depth, strip=strip,
+        strip_period_px=period, content=layout.image[top:bottom,left:right], inset_panel=panel)

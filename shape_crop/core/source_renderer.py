@@ -104,7 +104,7 @@ def render_source(design, material, inner_material=None, max_side=None, progress
         elif layout.framed_artwork is not None:
             rgb = sample_framed_artwork(layout, mapping, scale, x, y, px_cm)
         elif layout.inset_panel is not None:
-            rgb = adapt_panel(layout, mapping, shape, border_cm, x, y)
+            rgb = adapt_panel(layout, mapping, shape, border_cm, x, y, px_cm)
         else:
             rgb = mapping.sample(layout, x, y)
         if border_cm:
