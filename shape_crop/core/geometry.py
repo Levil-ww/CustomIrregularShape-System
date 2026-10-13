@@ -218,3 +218,28 @@ def inset_boundary_fraction(shape, x, y, depth, reference=None):
     coordinate = np.where(on_line, np.where(y <= 0, top, bottom),
                           np.where(x >= 0, right, left))
     return (coordinate / perimeter) % 1
+
+
+def clipped_boundary_coordinate(shape, x, y, reference):
+    """Keep straight/arc phases fixed and clip their overhanging joint ink.
+
+    A miter cannot both keep every radial row continuous and preserve glyph
+    shapes. Use one physical x transform on straights and one angular transform
+    on arcs, leaving the original band background beyond either segment end.
+    """
+    center = shape.center if isinstance(shape, ArcBand) else 0.
+    theta = np.arctan2(y, np.abs(x) - center)
+    radial_depth = shape.radius - np.hypot(np.abs(x) - center, y)
+    on_line = shape.half_height - np.abs(y) <= radial_depth
+    if isinstance(shape, ArcBand):
+        on_line |= np.abs(x) <= center
+    arc = 2 * reference.radius * reference.angle
+    top = x + reference.chord / 2
+    bottom = reference.chord + arc + reference.chord / 2 - x
+    right = reference.chord + reference.radius * (theta + reference.angle)
+    left = 2 * reference.chord + arc + reference.radius * (reference.angle - theta)
+    coordinate = np.where(on_line, np.where(y <= 0, top, bottom),
+                          np.where(x >= 0, right, left))
+    valid = np.where(on_line, np.abs(x) <= reference.chord / 2,
+                     np.abs(theta) <= reference.angle)
+    return coordinate % reference.perimeter, valid

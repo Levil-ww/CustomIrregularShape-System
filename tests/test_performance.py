@@ -114,9 +114,9 @@ def test_float32_sampling_stays_within_one_channel_level():
 def test_source_border_only_samples_covered_pixels_and_matches_dense_render(shape_mode, side_border):
     from shape_crop.core import source_renderer
     from shape_crop.core.content_mapping import ContentMapping
-    from shape_crop.core.geometry import create_shape, inset_boundary_fraction
+    from shape_crop.core.geometry import create_shape, clipped_boundary_coordinate
     from shape_crop.core.renderer import blend
-    from shape_crop.core.sampling import sample_perimeter_strip, uniform_strip_band
+    from shape_crop.core.sampling import sample, sample_perimeter_strip, uniform_strip_band
     from shape_crop.models.design import DesignSpec, BorderSpec
     from shape_crop.services.layout_analysis import SourceLayout
     from shape_crop.services.materials import PreparedMaterial
@@ -147,7 +147,7 @@ def test_source_border_only_samples_covered_pixels_and_matches_dense_render(shap
     if plain_band and source_depth >= plain_band[1]:
         ring_depth += extra
     ring = shape.inset(ring_depth)
-    arc = inset_boundary_fraction(shape, x, y, np.clip(depth, 0, border), ring) * ring.perimeter
+    arc, valid_joint = clipped_boundary_coordinate(shape, x, y, ring)
     expected = ContentMapping.create(layout, 40, 24, border).sample(layout, x, y)
     sample_depth = depth
     if plain_band:
@@ -158,6 +158,8 @@ def test_source_border_only_samples_covered_pixels_and_matches_dense_render(shap
                                         depth - extra))
     stripe = sample_perimeter_strip(strip, arc, np.maximum(0, sample_depth / scale - .5),
                                     ring.perimeter, scale, (100 - ring.chord / scale) / 2)
+    background = np.median(strip, axis=1).astype(np.uint8)[:, None, :]
+    stripe[~valid_joint] = sample(background, 0, np.maximum(0, sample_depth[~valid_joint] / scale - .5))
     blend(expected, stripe, np.clip((border - depth) / px_cm + .5, 0, 1))
     sampled_pixels = []
 

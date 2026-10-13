@@ -1,7 +1,8 @@
 """Preserve source frames and uniformly fit artwork according to its visual layout."""
 import numpy as np
 from PIL import Image
-from shape_crop.core.geometry import create_shape, inset_boundary_fraction, _compute_depth_and_radial, CircularBand
+from shape_crop.core.geometry import (create_shape, inset_boundary_fraction,
+    clipped_boundary_coordinate, _compute_depth_and_radial, CircularBand)
 from shape_crop.core.sampling import sample_perimeter_strip, sample_sentence_strip, uniform_strip_band, sample
 from shape_crop.core.content_mapping import ContentMapping
 from shape_crop.core.round_rings import recognize_round_ring, sample_round_rings
@@ -72,6 +73,9 @@ def render_source(design, material, inner_material=None, max_side=None, progress
         ring = shape.inset(min(glyph_depth, shape.half_height - 1e-6))
     strip_width = layout.strip.shape[1]
     origin = (strip_width - ring.chord / scale) / 2
+    blank_strip = np.median(layout.strip, axis=1).astype(np.uint8)[:, None, :]
+    layered_blank = (np.median(layout.layered_strip[1], axis=1).astype(np.uint8)[:, None, :]
+                     if layout.layered_strip is not None else None)
     x = ((np.arange(width, dtype=np.float32) + .5) / width - .5)[None, :] * design.diameter_cm
     x_sq = x * x
     output = Image.new('RGBA', (width, height))
@@ -115,8 +119,12 @@ def render_source(design, material, inner_material=None, max_side=None, progress
             border_depth = depth[rows, columns]
             # Continuous clockwise coordinates rotate the lower text by 180 degrees.
             # A reflected y coordinate would mirror every glyph on the lower half.
-            s = inset_boundary_fraction(shape, x[0, columns], y[rows, 0],
-                                        np.clip(border_depth, 0, border_cm), ring) * ring.perimeter
+            if round_ring is not None or layout.corner_gaps is not None:
+                s = inset_boundary_fraction(shape, x[0, columns], y[rows, 0],
+                                            np.clip(border_depth, 0, border_cm), ring) * ring.perimeter
+                valid_joint = np.ones(s.shape, dtype=bool)
+            else:
+                s, valid_joint = clipped_boundary_coordinate(shape, x[0, columns], y[rows, 0], ring)
             source_depth_cm = border_depth
             if plain_band:
                 band_start, band_end = (value * scale for value in plain_band)
@@ -138,6 +146,12 @@ def render_source(design, material, inner_material=None, max_side=None, progress
                 inner_rows = sample_depth >= outer_depth
                 stripe[inner_rows] = sample_perimeter_strip(full_strip, s[inner_rows], sample_depth[inner_rows],
                     ring.perimeter, scale, (full_strip.shape[1] - ring.chord / scale) / 2)
+            clipped = ~valid_joint
+            if np.any(clipped):
+                stripe[clipped] = sample(blank_strip, 0, sample_depth[clipped])
+                if layered_blank is not None:
+                    clipped_inner = clipped & inner_rows
+                    stripe[clipped_inner] = sample(layered_blank, 0, sample_depth[clipped_inner])
             if round_ring is not None:
                 stripe = sample_round_rings(round_ring, ring, scale, x[0, columns],
                     y[rows, 0], sample_depth, stripe)
