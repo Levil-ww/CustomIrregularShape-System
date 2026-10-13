@@ -135,6 +135,39 @@ def test_manual_arc_snapshot():
     app.processEvents()
 
 
+@pytest.mark.parametrize('entry', ['click', 'tab'])
+def test_pending_straight_dimension_selects_text_for_typing(entry):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtTest import QTest
+    from shape_crop.gui.main_window import MainWindow
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        window.shape_mode.setCurrentIndex(1)
+        window.show()
+        window.target.setFocus()
+        app.processEvents()
+        editor = window.straight_value.lineEdit()
+        if entry == 'click':
+            QTest.mouseClick(editor, Qt.LeftButton, pos=editor.rect().center())
+        else:
+            window.height_value.setFocus()
+            QTest.keyClick(window.height_value, Qt.Key_Tab)
+        app.processEvents()
+        assert editor.selectedText() == '待填写'
+        QTest.mouseClick(editor, Qt.LeftButton, pos=editor.rect().center())
+        assert editor.selectedText() == '待填写'
+        QTest.keyClicks(editor, '108.50')
+        QTest.keyClick(editor, Qt.Key_Tab)
+        assert window.straight_value.value() == 108.5
+        assert editor.text() == '108.50'
+        QTest.mouseClick(editor, Qt.LeftButton, pos=editor.rect().center())
+        assert editor.selectedText() != '108.50'
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_target_history_records_both_modes_and_survives_restart(tmp_path, monkeypatch):
     from unittest.mock import Mock
     from shape_crop.gui import main_window

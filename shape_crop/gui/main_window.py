@@ -2,7 +2,7 @@
 """Filename-driven automatic workflow; optional settings are collapsed."""
 from pathlib import Path
 from shape_crop import __version__
-from PyQt5.QtCore import QSettings
+from PyQt5.QtCore import QEvent, QSettings
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QLabel, QFileDialog, QComboBox, QSpinBox, QDoubleSpinBox,
     QGroupBox, QMessageBox, QProgressBar, QCheckBox, QScrollArea, QSplitter, QTabWidget,
@@ -22,6 +22,28 @@ from shape_crop.services.catalog_session import CatalogSession
 
 
 TARGET_HISTORY_LIMIT = 15
+
+
+class PendingDimensionSpinBox(QDoubleSpinBox):
+    """Select the pending dimension label when entering the editor."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.lineEdit().installEventFilter(self)
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        if self.value() == self.minimum() and self.specialValueText():
+            self.selectAll()
+
+    def eventFilter(self, watched, event):
+        if (watched is self.lineEdit() and event.type() == QEvent.MouseButtonRelease
+                and event.button() == Qt.LeftButton
+                and self.lineEdit().text() == self.specialValueText()
+                and self.specialValueText()):
+            self.selectAll()
+            return True
+        return super().eventFilter(watched, event)
 
 
 class MainWindow(QMainWindow):
@@ -177,7 +199,7 @@ class MainWindow(QMainWindow):
         dimension_form = QFormLayout()
         self.width_value = QDoubleSpinBox()
         self.height_value = QDoubleSpinBox()
-        self.straight_value = QDoubleSpinBox()
+        self.straight_value = PendingDimensionSpinBox()
         for field in (self.width_value, self.height_value, self.straight_value):
             field.setRange(0, 1000)
             field.setDecimals(2)
