@@ -75,7 +75,11 @@ def _sample_translucent_panel(layout, mapping, inner, x, y, pixel_cm):
     rgb = sample(layout.image, u, v).astype(np.float32)
     # A source outline hides its original ink. Interpolate only across that
     # narrow stroke, never bend the surrounding flowers to move the outline.
-    pad = thickness + 1
+    # Thumbnail-derived edges can lie between source pixels. Include the
+    # neighbouring pixel's bilinear footprint as well as the JPEG fringe;
+    # otherwise a dark lobe just outside the repaired band is amplified by
+    # undoing the nearly opaque fade and survives as a straight seam.
+    pad = thickness + 2
     for horizontal, lo, hi, start, end in ((True, top, bottom, left, right),
                                           (False, left, right, top, bottom)):
         coordinate, other = (v, u) if horizontal else (u, v)

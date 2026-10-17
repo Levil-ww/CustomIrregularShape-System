@@ -144,6 +144,37 @@ def test_native_outline_cleanup_uses_actual_stroke_width():
     assert corrected.inset_panel.translucent[3] >= 16
 
 
+@pytest.mark.parametrize('horizontal', [True, False])
+@pytest.mark.parametrize('fraction', [.22, .78])
+def test_fractional_old_outline_cleanup_includes_resampled_jpeg_fringe(horizontal, fraction):
+    from shape_crop.core.content_mapping import ContentMapping
+    from shape_crop.core.geometry import CircularBand
+    from shape_crop.core.panel_mapping import _sample_translucent_panel
+    layout = analyze_layout(circles_source())
+    pixels = layout.image.copy()
+    background = np.array((242, 237, 217), dtype=np.uint8)
+    # The detected edge is fractional after scaling the analysis thumbnail.
+    # A dark JPEG lobe just outside the cleanup band is amplified by the
+    # nearly opaque fade, leaving a seam below the new curved corner.
+    pixels[250:295, 250:295] = background
+    if horizontal:
+        pixels[270, 250:295] = background - 5
+        pixels[272:276, 250:295] = 20
+        point = (260., 270.)
+    else:
+        pixels[250:295, 270] = background - 5
+        pixels[250:295, 272:276] = 20
+        point = (270., 260.)
+    panel = replace(layout.inset_panel, box=(84., 84., 275.+fraction, 275.+fraction),
+        translucent=((72., 72., 300., 300.), .88, tuple(background), 4., (20, 20, 18)),
+        stroke_repeat_px=0, partial_fade_edges=())
+    layout = replace(layout, image=pixels, inset_panel=panel)
+    result = _sample_translucent_panel(layout, ContentMapping(1, 0, 0, 0, 0),
+        CircularBand(1, 1), np.array([[point[0]]]), np.array([[point[1]]]), 1)
+    np.testing.assert_allclose(result[0, 0], background, atol=2,
+        err_msg='旧描边附近的JPEG暗边恢复后形成接缝')
+
+
 def test_tinted_source_fade_recovers_neutral_black_without_blue_fringe():
     from shape_crop.core.content_mapping import ContentMapping
     from shape_crop.core.geometry import CircularBand

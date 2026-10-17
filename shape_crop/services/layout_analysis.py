@@ -115,6 +115,7 @@ def boundary_depth(pixels):
     # is artwork, not another separator; scanning past content silently discards the picture.
     run = max(5, round(height * .009))
     depth = None
+    periodic_end = 0
     for row in range(1, limit - run):
         if uniform[row - 1] and not uniform[row] and not np.any(uniform[row:row + run]):
             # A short, genuinely periodic ornament followed by another separator is still
@@ -149,6 +150,7 @@ def boundary_depth(pixels):
                     np.mean(dark[checker_rows, half_period:] !=
                             dark[checker_rows, :-half_period]) >= .90)
                 if period and (band_depth <= 4 * run or straight_ticks or checker) and period <= max(4 * run, 2 * band_depth):
+                    periodic_end = end
                     continue
                 # A sentence is not periodic. Keep sparse ink on the preceding
                 # flat background when it is enclosed by another flat row.
@@ -175,9 +177,12 @@ def boundary_depth(pixels):
         return blank_start
     if depth:
         return depth
-    # A centred illustration can lie beyond this edge's bounded scan. A long
-    # blank region after an enclosed frame still identifies a valid boundary.
-    return 0
+    # A proven shallow periodic frame may surround a completely plain centre,
+    # with no later artwork transition or inner separator to stop the scan.
+    # Retain its measured band instead of reporting an unframed image while
+    # the other edge scans still exclude the original side decorations.
+    return periodic_end if (0 < periodic_end <= height * .12 and
+                            np.all(uniform[periodic_end:])) else 0
 
 
 def _sentence_layer(strip):
@@ -303,6 +308,52 @@ def _texture_layout(pixels):
     return SourceLayout(pixels, strip, depth, width, height,
                         '大理石纹理等比满铺，仅保留外沿细黑线，不扩展色带',
                         content, (left, top, right, bottom), texture_fill=True)
+
+
+def _nested_pale_frame(pixels, bounds):
+    """Extend a frame through proven nested pale strokes on a quiet background."""
+    height, width = pixels.shape[:2]
+    background = np.median(pixels[round(height*.35):round(height*.65),
+                                  round(width*.35):round(width*.65)].reshape(-1, 3), axis=0).astype(np.float32)
+    difference = np.max(np.abs(pixels.astype(np.int16)-background), axis=2)
+    if np.mean(difference[round(height*.35):round(height*.65),
+                          round(width*.35):round(width*.65)] <= 10) < .995:
+        return None
+    pale = (difference > 10) & (difference < 100) & (np.min(pixels, axis=2) > 110)
+    limit = round(min(height, width)*.35)
+    starts = (bounds[1], height-bounds[3], bounds[0], width-bounds[2])
+    runs = []
+    for side, start in zip((pale, pale[::-1], pale.T, pale[:, ::-1].T), starts):
+        rows = np.mean(side[:limit, round(side.shape[1]*.30):round(side.shape[1]*.70)], axis=1) > .98
+        changes = np.diff(np.r_[False, rows, False].astype(np.int8))
+        pairs = [(int(a), int(b)) for a, b in zip(np.flatnonzero(changes == 1),
+                                                np.flatnonzero(changes == -1))
+                 if start+2 <= a < b < limit and b-a <= max(4, min(height, width)*.012)]
+        runs.append(pairs)
+    if len(runs[0]) < 2 or any(len(side) != len(runs[0]) for side in runs):
+        return None
+    covered = np.zeros(pale.shape, dtype=bool)
+    for top, bottom, left, right in zip(*runs):
+        t0, t1 = top
+        b0, b1 = height-bottom[1], height-bottom[0]
+        l0, l1 = left
+        r0, r1 = width-right[1], width-right[0]
+        sides = (pale[t0:t1, l0:r1], pale[b0:b1, l0:r1],
+                 pale[t0:b1, l0:l1].T, pale[t0:b1, r0:r1].T)
+        if any(not side.size or np.max(np.mean(side, axis=1)) < .98 for side in sides):
+            return None
+        # Include antialiased JPEG fringes, but no unrelated interior artwork.
+        for a, b, c, d in ((l0, t0, r1, t1), (l0, b0, r1, b1),
+                            (l0, t0, l1, b1), (r0, t0, r1, b1)):
+            covered[max(0, b-2):min(height, d+2), max(0, a-2):min(width, c+2)] = True
+    a, b, c, d = bounds
+    # Existing outer-stroke refinement can include one antialiased edge row.
+    # Assess unexplained artwork beyond that original separator's fringe.
+    a, b, c, d = a+2, b+2, c-2, d-2
+    unexplained = (difference[b:d, a:c] > 10) & ~covered[b:d, a:c]
+    if np.mean(unexplained) > .005:
+        return None
+    return runs[2][-1][1], runs[0][-1][1], width-runs[3][-1][1], height-runs[1][-1][1]
 
 
 def _closed_thin_frame(pixels):
@@ -452,10 +503,18 @@ def analyze_layout(image, *, texture_fill=False, composition_hint=None):
         if max(overshoot) > min(width, height) * .12:
             left, top, right, bottom = frame
             depth = top
+    ratios = (width / probe.width, height / probe.height) * 2
+    nested = _nested_pale_frame(detected, tuple(round(value/ratio) for value, ratio in
+                                zip((left, top, right, bottom), ratios)))
+    if nested is not None:
+        left, top, right, bottom = (round(value*ratio) for value, ratio in zip(nested, ratios))
+        depth = top
     framed = detect_framed_artwork(image, (left, top, right, bottom))
     if framed is not None:
         left, top, right, bottom = (round(value) for value in framed.frame)
-    panel = detect_inset_panel(image)
+    # These closed strokes are already part of the outer frame. Detecting
+    # them again as an independent pale panel would draw a second copy.
+    panel = None if nested is not None else detect_inset_panel(image)
     floating = None
     if panel is None:
         floating = detect_floating_artwork(probe) or detect_neutral_background_artwork(probe)
@@ -529,6 +588,12 @@ def analyze_layout(image, *, texture_fill=False, composition_hint=None):
     # Extract only the safe horizontal span. Side borders need not equal the top depth.
     safe_left, safe_right = min(left + 1, right - 1), max(left + 1, right - 1)
     region = _straight_outline_rows(pixels[:max(1, depth), safe_left:safe_right])
+    if nested is not None:
+        # Collapse only a proven uniform profile. Outer periodic ornaments
+        # outside the nested-frame proof must keep their tangential pixels.
+        profile = np.median(region, axis=1).astype(np.uint8)[:, None, :]
+        if np.all(np.max(np.abs(region.astype(np.int16)-profile), axis=2) <= 10):
+            region = profile
     periodic_region = region if layered_depth is None else region[:layered_depth]
     strip, period = extract_period(periodic_region)
     if not period:
