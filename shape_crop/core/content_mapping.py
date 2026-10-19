@@ -21,6 +21,11 @@ class ContentMapping:
     def required_border(layout, diameter_cm, height_cm):
         """Minimum symmetric frame that covers all four original rectangular edges."""
         scale = ContentMapping.source_scale(layout, diameter_cm, height_cm)
+        if layout.layered_strip is not None:
+            # A verified complete strip replaces all four rectangular edges.
+            # Its radial thickness comes from the measured source band; wider
+            # side margins do not require padding the original black rim.
+            return layout.border_depth_px * scale
         left, top, right, bottom = layout.content_box_px
         return max(left * scale, (layout.width_px - right) * scale,
                    (height_cm - layout.height_px * scale) / 2 + top * scale,
@@ -31,7 +36,7 @@ class ContentMapping:
     def create(cls, layout, diameter_cm, height_cm, border_cm, shape=None):
         scale = cls.source_scale(layout, diameter_cm, height_cm)
         left, top, right, bottom = layout.content_box_px
-        if layout.texture_fill:
+        if layout.texture_fill or layout.layered_strip is not None:
             scale = max((diameter_cm - 2 * border_cm) / (right - left),
                         (height_cm - 2 * border_cm) / (bottom - top))
             return cls(scale, (left + right - 1) / 2, (top + bottom - 1) / 2, left, top)

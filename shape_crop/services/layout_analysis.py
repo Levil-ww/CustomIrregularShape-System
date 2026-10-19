@@ -50,6 +50,8 @@ class SourceLayout:
             return '中央内框类'
         if self.floating_artwork is not None:
             return '独立图案留白类'
+        if self.layered_strip is not None:
+            return '多层装饰边框类'
         if self.strip_is_sentence:
             return '局部文字边框类'
         if self.strip_period_px:
@@ -388,10 +390,10 @@ def _closed_thin_frame(pixels):
     return l1, t1, width - r1, height - b1
 
 
-def _closed_textured_frame(pixels, bounds):
+def _closed_textured_frame(pixels, bounds, max_fraction=.22):
     """Extend periodic ticks only to a proven, bounded light inner rectangle."""
     height, width = pixels.shape[:2]
-    limit = round(min(height, width) * .22)
+    limit = round(min(height, width) * max_fraction)
     sides = (pixels, pixels.transpose(1, 0, 2), pixels[::-1],
              pixels[:, ::-1].transpose(1, 0, 2))
     starts = (bounds[1], bounds[0], height - bounds[3], width - bounds[2])
@@ -435,6 +437,22 @@ def _closed_textured_frame(pixels, bounds):
         if np.mean(np.any(matches, axis=0 if index < 2 else 1)) < .98:
             return None
     return left[1], top[1], width-right[1], height-bottom[1]
+
+
+def _enclosed_ornament_depth(pixels, outer_top, inner_top):
+    """Verify a shallow periodic ornament hidden just inside a plain rim."""
+    height, width = pixels.shape[:2]
+    limit = min(inner_top, round(height*.18))
+    region = pixels[:limit, round(width*.3):round(width*.7)]
+    ink = np.mean(np.max(region, axis=2)<40, axis=1)
+    active = np.flatnonzero((ink>.02)&(ink<.98))
+    if (len(active)<3 or active[0]>outer_top+max(3,round(height*.01)) or
+            active[-1]>=limit-2 or np.any(np.diff(active)>2) or
+            active[-1]-active[0]>height*.08):
+        return None
+    end = int(active[-1])+2
+    _, period = extract_dark_period(region[:end])
+    return end if period else None
 
 
 def analyze_layout(image, *, texture_fill=False, composition_hint=None):
@@ -538,8 +556,23 @@ def analyze_layout(image, *, texture_fill=False, composition_hint=None):
                 ratios = (width / probe.width, height / probe.height) * 2
                 left, top, right, bottom = (round(value * ratio) for value, ratio in zip(complete, ratios))
                 depth = top
+        if layered_depth is None:
+            # A plain outer rim can stop the initial scan before the ticks.
+            # Extend only after proving both a closed inner line and a bounded
+            # periodic ornament outside it; the pattern name is irrelevant.
+            bounds = (probe_left, probe_depth, probe_right, round(bottom*probe.height/height))
+            complete = _closed_textured_frame(detected, bounds, max_fraction=.35)
+            ornament_depth = (_enclosed_ornament_depth(detected, probe_depth, complete[1])
+                              if complete is not None else None)
+            if ornament_depth is not None:
+                panel = None
+                layered_depth = round(ornament_depth*height/probe.height)
+                ratios = (width/probe.width, height/probe.height)*2
+                left, top, right, bottom = (round(value*ratio) for value, ratio in zip(complete, ratios))
+                depth = top
         if panel is None and (not outer_period or not has_ornament):
-            framed = detect_rectangular_artwork(image, (left, top, right, bottom))
+            if layered_depth is None:
+                framed = detect_rectangular_artwork(image, (left, top, right, bottom))
         if framed is not None:
             left, top, right, bottom = (round(value) for value in framed.frame)
             depth = top

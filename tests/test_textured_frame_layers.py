@@ -27,6 +27,71 @@ def layered_source(closed=True):
     return Image.fromarray(p)
 
 
+def deep_layered_source(closed=True, ticks=True, side_extra=0):
+    yy, xx = np.mgrid[:480, :800]
+    depth = np.minimum.reduce((yy, xx, 479-yy, 799-xx))
+    pixels = np.full((480,800,3), (205,190,165), dtype=np.uint8)
+    noise = np.random.default_rng(19).random((160,267)) < .20
+    noise = np.repeat(np.repeat(noise,3,axis=0),3,axis=1)[:,:800]
+    pixels[noise] = (145,143,95)
+    pixels[depth<32] = (8,3,1)
+    if ticks:
+        mask = (depth>=32)&(depth<48)
+        horizontal = (yy<48)|(yy>=432)
+        pixels[mask & np.where(horizontal,(xx//16)%2==0,(yy//16)%2==0)] = 0
+    inner_depth = np.minimum.reduce((yy,xx-side_extra,479-yy,799-xx-side_extra))
+    pixels[inner_depth>=108] = (90,98,45)
+    pixels[(inner_depth>=118)&(inner_depth<121)] = (220,204,178)
+    if not closed:
+        pixels[180:300,118:121] = (90,98,45)
+    return Image.fromarray(pixels)
+
+
+@pytest.mark.parametrize('factor', [1,3])
+@pytest.mark.parametrize('name', ['青芜织序', '未命名织纹'])
+def test_deep_frame_after_plain_rim_is_classified_from_pixels(tmp_path,factor,name):
+    from shape_crop.services.materials import prepare
+    path=tmp_path/f'{name};45x75cm.png'
+    deep_layered_source().resize((800*factor,480*factor),Image.Resampling.NEAREST).save(path)
+    material=prepare(MaterialSpec(str(path)),preview=True)
+    layout=material.source_layout
+    assert layout.layered_strip is not None, '先读取图像结构，不能将完整多层边框当成纯色外框'
+    assert layout.category == '多层装饰边框类'
+    assert layout.border_depth_px/factor == pytest.approx(121,abs=2)
+    assert layout.strip_period_px/factor == pytest.approx(32,abs=1)
+    spec=DesignSpec(diameter_cm=137,height_cm=81,straight_cm=110.49,
+                    shape_mode='arc',border=BorderSpec(0,0,0))
+    result=np.asarray(render_source(spec,material,max_side=900))
+    shape=create_shape(spec)
+    scale=ContentMapping.source_scale(layout,137,81)
+    y=np.linspace(-10,10,80)
+    radius=shape.radius-119.5*factor*scale
+    x=shape.center+np.sqrt(radius**2-y**2)
+    rows=np.rint((y/81+.5)*result.shape[0]-.5).astype(int)
+    cols=np.rint((x/137+.5)*result.shape[1]-.5).astype(int)
+    assert np.mean(np.min(result[rows,cols,:3],axis=1)>150)>.9, '浅色内线必须随侧弧，不能留在原矩形位置'
+
+
+@pytest.mark.parametrize('closed,ticks', [(False,True),(True,False)])
+def test_unverified_deep_frame_keeps_original_analysis(closed,ticks):
+    layout=analyze_layout(deep_layered_source(closed=closed,ticks=ticks))
+    assert layout.layered_strip is None, '断线或缺少外侧装饰证据时不能套用多层装饰边框'
+
+
+def test_unequal_layer_margins_do_not_add_a_wider_black_rim():
+    layout=analyze_layout(deep_layered_source(side_extra=40))
+    assert layout.layered_strip is not None
+    material=PreparedMaterial(layout.image,layout.strip,MaterialSpec(),layout)
+    design=DesignSpec(diameter_cm=137,height_cm=81,straight_cm=110.49,
+                      shape_mode='arc',border=BorderSpec(0,0,0))
+    result=np.asarray(render_source(design,material,max_side=900))
+    scale=ContentMapping.source_scale(layout,137,81)
+    row=round(70*scale/81*result.shape[0]-.5)
+    assert result[row,result.shape[1]//2,:3].min()>60, '左右原边距较宽时不能向上下黑边补入额外宽度'
+    central=result[result.shape[0]//2, result.shape[1]//2,:3]
+    np.testing.assert_array_equal(central,(90,98,45),err_msg='中央花纹应独立等比覆盖内侧内容区')
+
+
 @pytest.mark.parametrize('factor', [1, 3, 6])
 def test_complete_inner_separator_retains_every_frame_layer(factor):
     image = layered_source().resize((800*factor, 480*factor), Image.Resampling.NEAREST)
