@@ -5,7 +5,7 @@ from shape_crop.core.geometry import (create_shape, inset_boundary_fraction,
     clipped_boundary_coordinate, _compute_depth_and_radial, CircularBand)
 from shape_crop.core.sampling import sample_perimeter_strip, sample_sentence_strip, uniform_strip_band, sample
 from shape_crop.core.content_mapping import ContentMapping
-from shape_crop.core.round_rings import recognize_round_ring, sample_round_rings
+from shape_crop.core.round_rings import recognize_round_ring, sample_round_rings, is_filled_dot_strip
 from shape_crop.core.framed_artwork_mapping import sample_framed_artwork, sample_contoured_frame
 from shape_crop.core.panel_mapping import adapt_panel
 from shape_crop.core.floral_mapping import sample_patterned_inset, corner_transforms, sample_corner_composition
@@ -73,6 +73,9 @@ def render_source(design, material, inner_material=None, max_side=None, progress
         ring = shape.inset(min(glyph_depth, shape.half_height - 1e-6))
     strip_width = layout.strip.shape[1]
     origin = (strip_width - ring.chord / scale) / 2
+    filled_dots = (bool(layout.strip_period_px) and not layout.strip_is_sentence and
+                   layout.corner_gaps is None and layout.layered_strip is None and
+                   is_filled_dot_strip(layout.strip))
     blank_strip = np.median(layout.strip, axis=1).astype(np.uint8)[:, None, :]
     layered_blank = (np.median(layout.layered_strip[1], axis=1).astype(np.uint8)[:, None, :]
                      if layout.layered_strip is not None else None)
@@ -125,6 +128,10 @@ def render_source(design, material, inner_material=None, max_side=None, progress
                 valid_joint = np.ones(s.shape, dtype=bool)
             else:
                 s, valid_joint = clipped_boundary_coordinate(shape, x[0, columns], y[rows, 0], ring)
+                if filled_dots:
+                    # Keep the same physical phases, but do not cut a blank
+                    # sliver through verified solid dots at segment endpoints.
+                    valid_joint[:] = True
             source_depth_cm = border_depth
             if plain_band:
                 band_start, band_end = (value * scale for value in plain_band)

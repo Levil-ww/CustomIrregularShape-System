@@ -3,6 +3,45 @@ import numpy as np
 from shape_crop.core.sampling import sample
 
 
+def is_filled_dot_strip(strip):
+    """Verify that every non-uniform ink row group contains filled round dots."""
+    height, width = strip.shape[:2]
+    if min(height, width) < 8:
+        return False
+    background = np.median(strip.reshape(-1, 3), axis=0)
+    ink = np.max(np.abs(strip.astype(np.float32)-background), axis=2) > 24
+    # Uniform separator strokes are independent of the circular ornaments.
+    ink[np.mean(ink, axis=1) > .95] = False
+    rows = np.flatnonzero(np.any(ink, axis=1))
+    groups = np.split(rows, np.flatnonzero(np.diff(rows) > 1)+1)
+    found = False
+    for group in groups:
+        if not len(group):
+            continue
+        diameter = len(group)
+        if diameter < 5:
+            return False
+        middle = ink[group[len(group)//2]]
+        repeated = np.tile(middle, 3)
+        changes = np.diff(np.r_[False,repeated,False].astype(np.int8))
+        starts, ends = np.flatnonzero(changes == 1), np.flatnonzero(changes == -1)
+        centres = [(lo+hi-1)/2-width for lo,hi in zip(starts,ends)
+                   if width <= (lo+hi-1)/2 < 2*width and .8*diameter <= hi-lo <= 1.2*diameter]
+        if not centres:
+            return False
+        yy, xx = np.mgrid[:diameter,:width]
+        expected = np.zeros((diameter,width),dtype=bool)
+        for centre in centres:
+            dx = (xx-centre+width/2)%width-width/2
+            expected |= dx*dx+(yy-(diameter-1)/2)**2 <= (diameter/2)**2
+        actual = ink[group]
+        union = np.count_nonzero(actual | expected)
+        if np.count_nonzero(actual & expected)/max(union,1) < .85:
+            return False
+        found |= diameter >= 8
+    return bool(found)
+
+
 def recognize_round_ring(strip):
     """Return a verified circular source glyph; other ornaments keep their mapping."""
     height, width = strip.shape[:2]
