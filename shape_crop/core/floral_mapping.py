@@ -1,6 +1,6 @@
 """Map inset textures and whole corner artwork as independent source layers."""
 import numpy as np
-from shape_crop.core.sampling import sample
+from shape_crop.core.sampling import sample, sample_curved_inset
 from shape_crop.core.renderer import blend
 
 
@@ -10,11 +10,9 @@ def sample_patterned_inset(layout,mapping,shape,border_cm,x,y,pixel_cm):
     _,top,_,bottom=layout.content_box_px
     gap=((b-top)+(bottom-d))/2/(bottom-top)
     inner=shape.inset(border_cm+gap*(shape.height-2*border_cm))
-    scale=max(inner.diameter/(c-a),inner.height/(d-b))
-    u=x/scale+(c-a-1)/2; v=y/scale+(d-b-1)/2
     result=np.empty(np.broadcast_shapes(x.shape,y.shape)+(3,),dtype=np.uint8)
     result[:]=panel.background
-    picture=sample(layout.image[b:d,a:c],u,v)
+    picture=sample_curved_inset(layout.image[b:d,a:c],inner,x,y)
     blend(result,picture,np.clip(inner.depth(x,y)/pixel_cm+.5,0,1))
     return result
 

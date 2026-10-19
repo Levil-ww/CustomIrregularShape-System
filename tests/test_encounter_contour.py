@@ -55,6 +55,26 @@ def test_other_picture_keeps_independent_rectangle(tmp_path):
     assert layout.contoured_frame is None
 
 
+@pytest.mark.parametrize('pattern', ['闲叙青釉', '闲叙邂逅'])
+def test_curved_texture_preserves_side_motifs_without_distorting_centre(tmp_path, pattern):
+    image = source()
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((58, 90, 72, 108), fill=(0, 0, 240))
+    draw.rectangle((527, 251, 541, 269), fill=(0, 0, 240))
+    path = tmp_path / f'{pattern};84x140cm.png'
+    image.save(path)
+    material = prepare(MaterialSpec(str(path)), preview=True)
+    design = DesignSpec(diameter_cm=140, height_cm=84, straight_cm=100,
+                        shape_mode='arc', border=BorderSpec(0, 0, 0))
+    pixels = np.asarray(render_source(design, material, max_side=1000))
+    blue = (pixels[..., 2] > 180) & (pixels[..., 0] < 20) & (pixels[..., 1] < 20)
+    assert blue[:, :500].sum() > 20, '左侧花纹应随内弧收拢，不能直接裁掉'
+    assert blue[:, 500:].sum() > 20, '右侧花纹应随内弧收拢，不能直接裁掉'
+    red = (pixels[..., 0] > 170) & (pixels[..., 1] < 20)
+    rows, columns = np.nonzero(red)
+    assert abs(np.ptp(rows) - np.ptp(columns)) <= 2, '中央花纹应保持原比例'
+
+
 def test_encounter_name_without_verified_picture_keeps_original_layout(tmp_path):
     path = tmp_path / '闲叙邂逅;84x140cm.png'
     Image.new('RGB', (600, 360), 'white').save(path)
@@ -71,6 +91,16 @@ def test_native_analysis_without_picture_recovers_verified_texture_bounds():
     assert result.contoured_frame is not None, '原分辨率识别失败后仍应保留已验证的弧形纹理内框'
     assert result.image is layout.image, '重新识别不能降低原分辨率像素'
     assert result.contoured_frame.inset_px == pytest.approx(300, abs=15)
+
+
+def test_texture_inset_removes_background_margin_from_picture_selection():
+    from shape_crop.services.layout_analysis import analyze_layout
+    from shape_crop.services.contoured_frame import adapt_texture_inset
+    layout = analyze_layout(source())
+    picture = replace(layout.framed_artwork, box=(52, 57, 548, 303))
+    result = adapt_texture_inset(replace(layout, framed_artwork=picture))
+    a, b, c, d = result.contoured_frame.box
+    assert a >= 55 and b >= 60 and c <= 545 and d <= 300, '外层纹理不能混入随弧线收拢的内花纹'
 
 
 def test_native_fallback_keeps_flat_background_colour():

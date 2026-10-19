@@ -139,7 +139,13 @@ def _prepare(material, preview):
         # Plain colour marble has veins all the way to a single black outline.
         # Crowned/framed marble designs must keep normal structural analysis.
         texture_fill = bool(re.fullmatch(r'(?:浅|深)?(?:白|灰|黑|褐|棕|米|黄|绿|蓝|红|粉)(?:色)?大理石\d*(?:号)?(?:方形)?', pattern))
-        hint = {'素缕花肆': 'patterned_inset', '花漾之约': 'corner_composition'}.get(pattern)
+        composition_hints = {'素缕花肆': 'patterned_inset', '牡丹织锦': 'patterned_inset',
+                             '花漾之约': 'corner_composition'}
+        # Standard library names can contain an earlier size token, e.g.
+        # 双面格-标准-40x60-牡丹织锦;40x60.jpg. Keep the composition hint tied
+        # to the actual pattern name rather than that first dimension pair.
+        source_pattern = re.split(r'[;；]', Path(material.path).stem)[0].rsplit('-', 1)[-1]
+        hint = composition_hints.get(source_pattern, composition_hints.get(pattern))
         if hint:
             layout = analyze_layout(image, composition_hint=hint)
         else:
@@ -150,7 +156,7 @@ def _prepare(material, preview):
             layout = _align_translucent_layout(layout, reference)
         if pattern == '哥特玫瑰':
             layout = adapt_contoured_frame(layout)
-        elif re.fullmatch(r'闲叙[·・.\s]*(?:青釉|邂逅)', pattern):
+        elif pattern in ('闲叙青釉', '闲叙邂逅'):
             layout = adapt_texture_inset(layout)
         return PreparedMaterial(layout.image, layout.strip, material, layout)
     content = extract(image, material.content_box)

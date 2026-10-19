@@ -49,13 +49,23 @@ def _clear_connected_white(mask, point):
 def detect_patterned_inset(image):
     probe=image.copy(); probe.thumbnail((1200,1200))
     pixels=np.asarray(probe).astype(np.float32); h,w=pixels.shape[:2]
-    background=np.median(pixels[round(h*.08):round(h*.14),round(w*.3):round(w*.7)].reshape(-1,3),axis=0)
+    # Measure a quiet gutter run instead of a fixed-height swatch: shallow
+    # gutters put the floral panel inside the former 8-14% background probe.
+    start=max(1,round(h*.02))
+    rows=pixels[start:round(h*.30),round(w*.3):round(w*.7)]
+    colours=np.median(rows,axis=1)
+    quiet=np.mean(np.max(np.abs(rows-colours[:,None,:]),axis=2)<18,axis=1)>.98
+    changes=np.diff(np.r_[False,quiet,False].astype(np.int8))
+    starts=np.flatnonzero(changes==1); ends=np.flatnonzero(changes==-1)
+    if not starts.size: return None
+    index=np.argmax(ends-starts)
+    background=np.median(rows[starts[index]:ends[index]].reshape(-1,3),axis=0)
     foreground=np.max(np.abs(pixels-background),axis=2)>18
     candidates=[]
     for box,count in _components(foreground):
         a,b,c,d=box
-        if (w*.04<a<w*.20 and w*.80<c<w*.96 and h*.10<b<h*.30
-                and h*.70<d<h*.90 and count>(c-a)*(d-b)*.60):
+        if (w*.02<a<w*.20 and w*.80<c<w*.98 and h*.02<b<h*.30
+                and h*.70<d<h*.98 and count>(c-a)*(d-b)*.60):
             candidates.append(box)
     if len(candidates)!=1: return None
     left,top,right,bottom=candidates[0]

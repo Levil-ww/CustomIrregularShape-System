@@ -40,6 +40,23 @@ def sample(image, x, y, wrap_x=False, wrap_y=False):
     return a.astype(np.uint8)
 
 
+def sample_curved_inset(image, shape, x, y):
+    """Keep the centre uniform and smoothly gather side motifs onto the arcs."""
+    height, width = image.shape[:2]
+    scale = max(shape.diameter / width, shape.height / height)
+    extent = getattr(shape, 'center', 0.) + np.sqrt(np.maximum(
+        0., shape.radius**2 - np.minimum(np.abs(y), shape.half_height)**2))
+    # Leave the middle half untouched. A cubic transition has zero derivative
+    # at both ends, so there is no hard seam where the side adjustment begins.
+    anchor = extent * .5
+    phase = np.clip((np.abs(x) - anchor) / np.maximum(extent - anchor, 1e-6), 0, 1)
+    weight = phase * phase * (3 - 2 * phase)
+    excess = np.maximum(0., (width - 1) * scale / 2 - extent)
+    u = (x + np.sign(x) * excess * weight) / scale + (width - 1) / 2
+    v = y / scale + (height - 1) / 2
+    return sample(image, u, v)
+
+
 def sample_perimeter_strip(image, arc_length, depth_px, perimeter_cm, source_scale_cm, origin=0.):
     """Close the perimeter with an integer count of complete source periods.
 

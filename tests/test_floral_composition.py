@@ -53,6 +53,61 @@ def test_patterned_inset_keeps_its_height_and_follows_curved_contour(tmp_path):
     assert np.mean(pattern[60:-60])>.50,'中央花纹不能被误识别边框挤压成窄条'
 
 
+@pytest.mark.parametrize('size', [(600,400),(1200,800)])
+def test_peony_brocade_uses_patterned_inset_layout_at_every_source_size(tmp_path,size):
+    image=patterned_source().resize(size,Image.Resampling.LANCZOS)
+    source=material(tmp_path,image,'牡丹织锦')
+    assert source.source_layout.patterned_inset is not None, '牡丹织锦各尺寸应统一按中央花纹内框排版'
+    assert source.source_layout.category=='中央花纹内框类'
+
+
+def test_peony_side_motifs_follow_curve_instead_of_being_cut_off(tmp_path):
+    image=patterned_source()
+    draw=ImageDraw.Draw(image)
+    draw.rectangle((51,73,65,85),fill=(0,0,240))
+    draw.rectangle((534,314,548,326),fill=(0,0,240))
+    source=material(tmp_path,image,'牡丹织锦')
+    result=np.asarray(render_source(spec(),source,max_side=1000))
+    blue=(result[...,2]>180)&(result[...,0]<20)&(result[...,1]<20)
+    assert blue[:,:500].sum()>10, '牡丹左侧花纹应顺着内弧保留'
+    assert blue[:,500:].sum()>10, '牡丹右侧花纹应顺着内弧保留'
+
+
+@pytest.mark.parametrize('size', [(655,400),(1300,800),(2620,1600)])
+@pytest.mark.parametrize('preview', [False,True])
+@pytest.mark.parametrize('filename', ['牡丹织锦;80X131CM.png','双面格-标准-80x131-牡丹织锦;80x131.png'])
+def test_peony_shallow_gutter_curves_with_each_target_size(tmp_path,size,preview,filename):
+    # The real 80x130/131 sources start their black floral panel at 9% height,
+    # inside the old fixed background probe (8-14%).
+    image=Image.new('RGB',(655,400),'black')
+    draw=ImageDraw.Draw(image)
+    draw.rectangle((12,12,642,387),fill=(255,241,228))
+    for x in range(14,642,5):
+        for y in (12,387):
+            draw.ellipse((x-2,y-2,x+2,y+2),fill=(230,198,158),outline='black')
+    draw.rectangle((41,37,613,362),fill='black')
+    for y in range(39,360,21):
+        for x in range(44,610,27):
+            draw.ellipse((x,y,x+9,y+13),outline=(230,198,158),width=2)
+    path=tmp_path/filename
+    image.resize(size,Image.Resampling.LANCZOS).save(path)
+    source=prepare(MaterialSpec(path=str(path)),preview=preview)
+    assert source.source_layout.patterned_inset is not None, '窄留白不能使中央花纹退回矩形画框'
+    for width,height,straight in ((136,84,107),(138,76.8,110),(180,90,150)):
+        design=replace(spec(),diameter_cm=width,height_cm=height,straight_cm=straight)
+        result=np.asarray(render_source(design,source,max_side=700))
+        h,w=result.shape[:2]
+        def left_edge(row):
+            background=np.max(np.abs(result[row,:w//2,:3].astype(float)-(255,241,228)),axis=1)<8
+            background &= result[row,:w//2,3]>240
+            changes=np.diff(np.r_[False,background,False].astype(np.int8))
+            starts=np.flatnonzero(changes==1); ends=np.flatnonzero(changes==-1)
+            gaps=ends[(ends-starts)>w*.02]
+            assert gaps.size, '花纹与圆点边框之间应保留完整留白'
+            return gaps[0]
+        assert left_edge(round(h*.18))>left_edge(h//2)+w*.02, '中间花纹左右边缘必须随外轮廓弯曲'
+
+
 @pytest.mark.parametrize('top',[2,18])
 def test_corner_bouquets_and_bottom_text_are_kept_as_independent_layers(tmp_path,top):
     source=material(tmp_path,corner_source(top),'花漾之约')

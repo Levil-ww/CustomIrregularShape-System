@@ -24,7 +24,10 @@ def parse_filename(value):
         raise ValueError('请输入合法的目标文件名（不包含目录路径或 Windows 禁用字符）')
     stem = re.sub(r'\.(?:jpg|jpeg|png)$', '', value, flags=re.I)
     normalized = unicodedata.normalize('NFKC', stem)
-    match = re.search(r'(\d+(?:\.\d+)?)\s*[xX×✕]\s*(\d+(?:\.\d+)?)\s*(?:cm|厘米)?', normalized, re.I)
+    dimensions = re.compile(r'(\d+(?:\.\d+)?)\s*[xX×✕]\s*(\d+(?:\.\d+)?)\s*(?:cm|厘米)?', re.I)
+    # Standard library names also include a size before the pattern name.
+    # The explicit specification after the semicolon takes precedence.
+    match = dimensions.search(normalized, normalized.rfind(';') + 1) or dimensions.search(normalized)
     if not match:
         raise ValueError('目标名称中未找到尺寸，例如：花幔;80X140cm裁剪有图')
     a, b = map(float, match.group(1, 2))
@@ -35,6 +38,11 @@ def parse_filename(value):
     if not parts:
         raise ValueError('文件名中缺少花型名称')
     pattern = re.sub(r'(裁剪有图|定制尺寸|矩形|横版|竖版|方形)$', '', parts[-1]).strip()
+    # Decorative middle dots and spacing do not create a different pattern.
+    # Keep the original stem for the customer's output filename.
+    pattern = re.sub(r'[·・\s]+', '', pattern)
+    if re.fullmatch(r'闲叙\.(?:青釉|邂逅)', pattern):
+        pattern = pattern.replace('.', '')
     if not pattern:
         raise ValueError('文件名中缺少花型名称')
     return ProductName(stem, parts[0] if len(parts) > 1 else '', pattern, max(a, b), min(a, b))

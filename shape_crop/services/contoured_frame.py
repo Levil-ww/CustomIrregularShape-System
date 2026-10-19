@@ -13,8 +13,36 @@ class ContouredFrame:
     inset_px: float
 
 
+def _texture_content_box(layout, artwork):
+    """Exclude the background padding used by rectangular-picture recognition."""
+    box = tuple(round(value) for value in artwork.box)
+    a, b, c, d = box
+    if not (0 < a < c < layout.width_px and 0 < b < d < layout.height_px):
+        return box
+    pixels = layout.image[b:d, a:c]
+    h, w = pixels.shape[:2]
+    centre = np.mean(pixels[h//4:3*h//4, w//4:3*w//4], axis=(0, 1))
+    background = np.median(artwork.tile.reshape(-1, 3), axis=0)
+    contrast = np.max(np.abs(centre-background))
+    if contrast < 24:
+        return box
+    tolerance = max(12, min(30, contrast*.4))
+    limit = max(3, round(min(layout.width_px, layout.height_px)*.015))
+    sides = (pixels, pixels[::-1], pixels.transpose(1, 0, 2), pixels[:, ::-1].transpose(1, 0, 2))
+    trims = []
+    for side in sides:
+        rows = side[:min(limit, side.shape[0]//4), side.shape[1]//4:3*side.shape[1]//4]
+        colours = np.mean(rows, axis=1)
+        matches = np.flatnonzero(np.max(np.abs(colours-centre), axis=1) < tolerance)
+        if not matches.size:
+            return box
+        trims.append(int(matches[0]))
+    top, bottom, left, right = trims
+    return a+left, b+top, c-right, d-bottom
+
+
 def adapt_texture_inset(layout):
-    """Curve a verified texture rectangle while keeping its fill uniformly scaled."""
+    """Curve a verified texture rectangle and retain its clean source pixels."""
     artwork = layout.framed_artwork
     if artwork is None and max(layout.width_px, layout.height_px) > 2400:
         # Native JPEG noise can hide a repeat accepted at preview resolution.
@@ -35,7 +63,7 @@ def adapt_texture_inset(layout):
             layout = replace(layout, framed_artwork=artwork)
     if artwork is None:
         return layout
-    box = tuple(round(value) for value in artwork.box)
+    box = _texture_content_box(layout, artwork)
     left, top, right, bottom = box
     if not (0 < left < right < layout.width_px and 0 < top < bottom < layout.height_px):
         return layout
@@ -44,7 +72,7 @@ def adapt_texture_inset(layout):
     # their original boundary instead of inventing a line from the fill.
     frame = ContouredFrame(box, np.empty((0, 1, 3), dtype=np.uint8), inset)
     return replace(layout, contoured_frame=frame,
-        report=layout.report + '；中央纹理随轮廓满铺，保留浅色外层间距与纹理比例')
+        report=layout.report + '；内侧纹理平滑随弧，中央保持比例，保留浅色外层间距')
 
 
 def adapt_contoured_frame(layout):

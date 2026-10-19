@@ -73,3 +73,49 @@ def test_material_override_has_no_automatic_match_warning():
         '花幔;90x138cm', material_override='指定素材.jpg'))
     assert design.material.path == '指定素材.jpg'
     assert detail == '使用指定素材\n素材：指定素材.jpg'
+
+
+@pytest.mark.parametrize('separator', [';', '；'])
+def test_standard_library_name_uses_pattern_and_dimensions_after_separator(separator):
+    parsed = parse_filename(f'双面格-标准-30x100-闲叙邂逅{separator}80x140CM.jpg')
+    assert parsed.pattern == '闲叙邂逅'
+    assert (parsed.width_cm, parsed.height_cm) == (140, 80)
+
+
+def test_standard_encounter_source_is_not_lost_to_long_strip_fallback(tmp_path):
+    standard = tmp_path / '双面格-标准-80x100-闲叙邂逅;80x100.jpg'
+    strip = tmp_path / '双面格-定制-定制尺寸-闲叙邂逅;48x200CM.jpg'
+    standard.touch()
+    strip.touch()
+    target = parse_filename('双面格-定制-裁剪有图-闲叙邂逅;84x136cm')
+    assert match_material(target, tmp_path).path == str(standard)
+
+
+@pytest.mark.parametrize('pattern', ['闲叙・邂逅', '闲叙·邂逅', '闲叙.邂逅'])
+def test_encounter_separator_alias_participates_in_same_catalog_group(tmp_path, pattern):
+    better = tmp_path / f'双面格-定制-定制尺寸-{pattern};90x180CM.jpg'
+    strip = tmp_path / '双面格-定制-定制尺寸-闲叙邂逅;48x200CM.jpg'
+    better.touch()
+    strip.touch()
+    target = parse_filename('双面格-定制-裁剪有图-闲叙邂逅;84x136cm')
+    assert match_material(target, tmp_path).path == str(better)
+
+
+@pytest.mark.parametrize('target_separator', ['', '・', '·', '.', ' '])
+@pytest.mark.parametrize('source_separator', ['', '・', '·', '.', ' '])
+@pytest.mark.parametrize('name', ['邂逅', '青釉'])
+def test_series_aliases_match_in_both_directions(tmp_path, target_separator, source_separator, name):
+    source = tmp_path / f'双面格-标准-85x140-闲叙{source_separator}{name};85x140.jpg'
+    source.touch()
+    target = parse_filename(f'双面格-定制-裁剪有图-闲叙{target_separator}{name};84x136cm')
+    match = match_material(target, tmp_path)
+    assert match.path == str(source)
+    assert match.source.pattern == target.pattern == f'闲叙{name}'
+
+
+@pytest.mark.parametrize('separator', ['・', '·', '･', ' '])
+def test_decorative_separator_is_normalized_for_other_patterns(separator):
+    name = f'双面格-定制-定制尺寸-闲叙{separator}素年;85x140CM.jpg'
+    parsed = parse_filename(name)
+    assert parsed.pattern == '闲叙素年'
+    assert parsed.stem == name[:-4], '归一化花型后仍应保留原始文件名'

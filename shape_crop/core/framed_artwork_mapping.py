@@ -1,6 +1,6 @@
 """Sample a complete independent picture over its original repeating background."""
 import numpy as np
-from shape_crop.core.sampling import sample
+from shape_crop.core.sampling import sample, sample_curved_inset
 from shape_crop.core.renderer import blend
 
 
@@ -38,7 +38,8 @@ def sample_contoured_frame(layout, shape, native_scale, border_cm, x, y, pixel_c
     a,b,c,d=frame.box
     scale=max((inner.diameter-2*thickness)/(c-a),(inner.height-2*thickness)/(d-b))
     picture=layout.image[b:d,a:c]
-    flowers=sample(picture,x/scale+(c-a-1)/2,y/scale+(d-b-1)/2)
+    flowers=(sample(picture,x/scale+(c-a-1)/2,y/scale+(d-b-1)/2) if thickness else
+             sample_curved_inset(picture,inner,x,y))
     blend(result,flowers,np.clip((depth-thickness)/pixel_cm+.5,0,1))
     if thickness:
         stroke=sample(frame.stroke,np.zeros_like(depth),depth/native_scale-.5)

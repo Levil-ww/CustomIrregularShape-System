@@ -454,7 +454,7 @@ def analyze_layout(image, *, texture_fill=False, composition_hint=None):
                       pixels[:max(1, top), left + 1:right - 1])
             strip, period = extract_period(_straight_outline_rows(region))
             kwargs = {composition_hint: composition}
-            report = ('中央花纹随内侧轮廓等比满铺，保留原留白与边框' if composition_hint == 'patterned_inset'
+            report = ('中央花纹平滑随弧，中央保持比例，保留原留白与边框' if composition_hint == 'patterned_inset'
                       else '角落花组完整等比适配，中间英文独立居中，保留原圆点边框')
             return SourceLayout(pixels, strip, top, width, height, report,
                                 pixels[top:bottom, left:right], frame, period, **kwargs)
