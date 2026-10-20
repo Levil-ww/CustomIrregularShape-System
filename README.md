@@ -1,4 +1,4 @@
-# 素材裁剪工作台 0.3.0
+# 异形智裁 0.4.1
 
 独立 Python / PyQt5 桌面程序，支持目标文件名匹配、精确截圆、完整圆及同心内圆填充。保持 models / core / services / workers / gui 分层，不依赖 SmartShapeCrop 运行。
 
@@ -16,12 +16,18 @@
 
 ## 启动
 
+Windows 用户可直接解压 `dist/异形智裁-0.4.1-20261019-Windows-x64.zip`，双击其中的 `异形智裁.exe`。无需安装 Python，图库由用户自行选择。升级说明见 `docs/更新说明_0.4.1.md`。开发环境按下面方式启动。
+
+也可以只向用户提供一个 EXE。`dist/` 中的安装包为本地生成文件，不随 Git 推送；现有 10 月 19 日分发包尚未包含之后提交的青芜织序多层边框修复，具体构建范围见上述升级说明。
+
 ```powershell
 python -m pip install -r requirements.txt
 python main.py
 ```
 
 当前工作环境运行依赖已可用。
+
+维护者在已安装 PyInstaller 的 Windows 64 位环境中运行 `python build.py`，即可重新构建单文件 EXE 和配套分发 ZIP。脚本先检查 OCR、图标和当前版本文档，构建成功后替换旧 EXE，并记录文件校验值及源码摘要；分发前还需运行测试和启动检查。
 
 ## 默认工作流
 
