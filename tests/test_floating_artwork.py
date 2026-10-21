@@ -9,6 +9,40 @@ from shape_crop.models.design import DesignSpec, BorderSpec
 from shape_crop.services.floating_artwork import detect_floating_artwork
 
 
+@pytest.mark.parametrize('factor', [1,4])
+@pytest.mark.parametrize('preview', [False,True])
+def test_gallery_content_excludes_original_thick_frame_and_its_fringe(tmp_path,factor,preview):
+    from shape_crop.services.materials import prepare
+    from shape_crop.models.design import MaterialSpec
+    from shape_crop.core.source_renderer import render_source
+    background=(247,240,232)
+    image=Image.new('RGB',(700,450),background)
+    draw=ImageDraw.Draw(image)
+    draw.rectangle((0,0,699,449),outline='black')
+    draw.rectangle((18,22,681,427),outline=(174,133,77),width=4)
+    colours=[(50,65,35),(170,130,70),(25,24,24)]
+    for box,colour in zip(((60,150,260,290),(290,150,410,290),(440,150,640,290)),colours):
+        draw.rectangle(box,fill=colour)
+    path=tmp_path/'无名画廊;90x140cm.jpg'
+    image.resize((700*factor,450*factor),Image.Resampling.LANCZOS).save(path,quality=95)
+    material=prepare(MaterialSpec(str(path)),preview=preview)
+    layout=material.source_layout
+    assert layout.floating_artwork is not None
+    edges=(layout.content[:2],layout.content[-2:],layout.content[:,:2],layout.content[:,-2:])
+    for edge in edges:
+        assert np.max(np.abs(edge.astype(float)-background))<14, '原矩形金框及抗锯齿边缘不能留在内容区'
+    design=DesignSpec(diameter_cm=141,height_cm=90.5,straight_cm=112.5,
+                      shape_mode='arc',border=BorderSpec(0,0,0))
+    result=np.asarray(render_source(design,material,max_side=1200))
+    h,w=result.shape[:2]
+    band=result[round(h*.85):round(h*.96),round(w*.43):round(w*.57),:3]
+    ink=np.mean(np.max(np.abs(band.astype(float)-background),axis=2)>14,axis=1)>.7
+    runs=np.count_nonzero(np.diff(np.r_[False,ink].astype(np.int8))==1)
+    assert runs==1, '底部只保留随轮廓绘制的金线，不能另有旧框横线'
+    for colour in colours:
+        assert np.count_nonzero(np.max(np.abs(result[...,:3].astype(float)-colour),axis=2)<4)>100, '中央图案应保留'
+
+
 @pytest.mark.parametrize('factor', [1, 4])
 @pytest.mark.parametrize('line_width', [2, 3])
 def test_narrow_gallery_clearance_does_not_count_thin_frame_as_artwork(factor, line_width):

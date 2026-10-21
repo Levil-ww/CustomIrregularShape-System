@@ -455,6 +455,29 @@ def _enclosed_ornament_depth(pixels, outer_top, inner_top):
     return end if period else None
 
 
+def _gallery_content_bounds(pixels, frame, artwork, background, padding):
+    """Exclude measured source strokes and interpolation fringes from gallery fill."""
+    height, width = pixels.shape[:2]
+    left, top, right, bottom = (round(value) for value in frame)
+    a, b, c, d = (round(value) for value in artwork)
+    fallback = (left+padding, top+padding, right-padding, bottom-padding)
+    if background is None:
+        return fallback
+    limit = max(padding, round(min(height,width)*.02))
+    def inset(rows):
+        values = rows[:limit].astype(np.float32)
+        occupied = np.mean(np.max(np.abs(values-background),axis=2)>10,axis=1)>.7
+        ink = np.flatnonzero(occupied)
+        # Two clean rows isolate the old stroke from bilinear interpolation.
+        return int(ink[-1])+3 if ink.size and ink[-1]>=padding-1 else padding
+    top_pad = inset(pixels[top:b,a:c])
+    bottom_pad = inset(pixels[d:bottom,a:c][::-1])
+    left_pad = inset(pixels[b:d,left:a].transpose(1,0,2))
+    right_pad = inset(pixels[b:d,c:right][:,::-1].transpose(1,0,2))
+    return (min(a-1,left+left_pad), min(b-1,top+top_pad),
+            max(c+1,right-right_pad), max(d+1,bottom-bottom_pad))
+
+
 def analyze_layout(image, *, texture_fill=False, composition_hint=None):
     if image.height > image.width:
         image = image.transpose(Image.Transpose.ROTATE_90)
@@ -613,8 +636,7 @@ def analyze_layout(image, *, texture_fill=False, composition_hint=None):
         # Gallery whitespace is content. Extract just the actual rectangular
         # frame, including a small recognition margin for antialiased outlines.
         padding = max(1, round(3 * max(width, height) / min(800, max(width, height))))
-        left, top = round(frame[0]) + padding, round(frame[1]) + padding
-        right, bottom = round(frame[2]) - padding, round(frame[3]) - padding
+        left, top, right, bottom = _gallery_content_bounds(pixels, frame, bounds, background, padding)
         depth = top
     if right <= left or bottom <= top:
         raise ValueError('原素材内容区识别失败，四边边框已占满图片')
