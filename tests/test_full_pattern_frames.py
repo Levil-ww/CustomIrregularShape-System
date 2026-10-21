@@ -7,6 +7,39 @@ from shape_crop.services.layout_analysis import analyze_layout, _closed_thin_fra
 from shape_crop.services.floating_artwork import detect_floating_artwork
 
 
+def rounded_double_frame_source(factor=1, broken=False):
+    scale=4
+    image=Image.new('RGB',(800*scale,320*scale),(121,78,46))
+    draw=ImageDraw.Draw(image)
+    draw.rectangle((0,0,800*scale-1,320*scale-1),outline='black',width=scale)
+    draw.rounded_rectangle((18*scale,18*scale,781*scale,301*scale),radius=10*scale,fill=(255,242,226))
+    for inset,radius,width in ((24,8,2),(28,8,2)):
+        draw.rounded_rectangle((inset*scale,inset*scale,(799-inset)*scale,(319-inset)*scale),
+                               radius=radius*scale,outline='black',width=width*scale)
+    for y in range(29,290,24):
+        for x in range(35,766,30):
+            draw.ellipse((x*scale,y*scale,(x+17)*scale,(y+19)*scale),fill='black')
+    if broken:
+        draw.rectangle((27*scale,100*scale,30*scale,180*scale),fill=(255,242,226))
+    return image.resize((800*factor,320*factor),Image.Resampling.LANCZOS)
+
+
+@pytest.mark.parametrize('factor',[1,3])
+def test_closed_rounded_inner_line_is_not_lost_at_pattern_transition(factor):
+    image=rounded_double_frame_source(factor)
+    layout=analyze_layout(image)
+    assert layout.border_depth_px >= 29*factor, '紧贴花纹的第二道闭合细线必须完整进入边框带'
+    profile=np.median(layout.strip,axis=1)
+    dark=np.max(profile,axis=1)<90
+    dark[:20*factor]=False
+    starts=np.flatnonzero(np.diff(np.r_[False,dark].astype(np.int8))==1)
+    assert len(starts)==2, '两道黑色内线都应保留'
+
+
+def test_broken_rounded_inner_line_is_not_proven_as_a_closed_frame():
+    assert _closed_thin_frame(np.asarray(rounded_double_frame_source(broken=True))) is None
+
+
 def faint_fill_source(pattern=True):
     image = Image.new('RGB', (800, 480), (160, 140, 110))
     draw = ImageDraw.Draw(image)

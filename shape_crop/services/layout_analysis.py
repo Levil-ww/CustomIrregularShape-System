@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image
 from shape_crop.services.texture_period import extract_period, extract_dark_period
 from shape_crop.services.floating_artwork import (detect_floating_artwork,
-    detect_contrasting_artwork, detect_neutral_background_artwork)
+    detect_contrasting_artwork, detect_neutral_background_artwork, _components)
 from shape_crop.services.inset_panel import detect_inset_panel
 from shape_crop.services.floral_composition import detect_patterned_inset, detect_corner_composition
 from shape_crop.services.framed_artwork import detect_framed_artwork, detect_rectangular_artwork
@@ -374,19 +374,37 @@ def _closed_thin_frame(pixels):
         runs = [(int(a), int(b)) for a, b in zip(starts, ends)
                 if 0 < a < b < limit and
                 b - a <= max(3, round(min(height, width) * .015))]
-        return runs[-1] if runs else None
+        return runs if runs else None
 
     strokes = (inner_stroke(dark), inner_stroke(dark[::-1]),
                inner_stroke(dark.T), inner_stroke(dark[:, ::-1].T))
     if any(stroke is None for stroke in strokes):
         return None
-    (t0, t1), (b0, b1), (l0, l1), (r0, r1) = strokes
+    # Do not combine one side's outer line with another side's inner line.
+    if len({len(stroke) for stroke in strokes})!=1:
+        return None
+    (t0, t1), (b0, b1), (l0, l1), (r0, r1) = (stroke[-1] for stroke in strokes)
     # Projection peaks alone are insufficient: verify every side all the way
     # to both corners. Sparse flowers and dotted borders cannot prove a frame.
     sides = (dark[t0:t1, l1:width-r1], dark[height-b1:height-b0, l1:width-r1],
              dark[t1:height-b1, l0:l1].T, dark[t1:height-b1, width-r1:width-r0].T)
-    if any(not side.size or np.max(np.mean(side, axis=1)) < .98 for side in sides):
+    if any(not side.size for side in sides):
         return None
+    if any(np.max(np.mean(side, axis=1)) < .98 for side in sides):
+        # Rounded corners shorten the straight strokes. Prove the remaining
+        # straight spans and an actual connected turn in each small corner.
+        corner = max(3, round(min(height,width)*.03))
+        if any(side.shape[1]<=2*corner or
+               np.max(np.mean(side[:,corner:-corner],axis=1))<.98 for side in sides):
+            return None
+        patches = (dark[t0:t0+corner,l0:l0+corner],
+                   dark[t0:t0+corner,width-r0-corner:width-r0],
+                   dark[height-b0-corner:height-b0,l0:l0+corner],
+                   dark[height-b0-corner:height-b0,width-r0-corner:width-r0])
+        for patch in patches:
+            if not any(a==0 and b==0 and c==patch.shape[1] and d==patch.shape[0]
+                       for (a,b,c,d),_ in _components(patch)):
+                return None
     return l1, t1, width - r1, height - b1
 
 
@@ -538,10 +556,12 @@ def analyze_layout(image, *, texture_fill=False, composition_hint=None):
     if frame is not None:
         ratios = (width / probe.width, height / probe.height) * 2
         frame = tuple(round(value * ratio) for value, ratio in zip(frame, ratios))
-        # Preserve established ornament/sentence scans. Intervene only when
-        # the scan has crossed far beyond a proven complete thin rectangle.
+        # Preserve established scans except for a large overshoot or a few
+        # recognition pixels missing from a proven complete thin rectangle.
         overshoot = (left - frame[0], top - frame[1], frame[2] - right, frame[3] - bottom)
-        if max(overshoot) > min(width, height) * .12:
+        fringe = max(2, int(np.ceil(3*max(width,height)/max(probe.size))))
+        near_transition = min(overshoot)<0 and max(abs(value) for value in overshoot)<=fringe
+        if max(overshoot) > min(width, height) * .12 or near_transition:
             left, top, right, bottom = frame
             depth = top
     ratios = (width / probe.width, height / probe.height) * 2
