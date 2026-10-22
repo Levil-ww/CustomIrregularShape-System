@@ -1,2 +1,2 @@
 """Physical-size circular and arc table material designer."""
-__version__ = '0.4.1'
+__version__ = '0.4.2'
