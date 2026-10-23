@@ -74,8 +74,11 @@ def detect_patterned_inset(image):
     outer=np.median(pixels[2:max(3,round(h*.025)),round(w*.3):round(w*.7)].reshape(-1,3),axis=0)
     if np.max(np.abs(colour-outer))>15 or np.max(np.abs(colour-background))<24: return None
     def depth(region):
-        indices=np.flatnonzero(np.mean(region,axis=1)>.95)
-        return int(indices[-1])+1 if indices.size else 0
+        # Round ornaments taper to small caps; a nearly-full row criterion
+        # cuts them at their widest part. Retain the sparse tips and one
+        # clean recognition row for resampling at the original resolution.
+        indices=np.flatnonzero(np.mean(region,axis=1)>.02)
+        return min(len(region),int(indices[-1])+2) if indices.size else 0
     frame_top=depth(foreground[:top,round(w*.3):round(w*.7)])
     frame_bottom=h-depth(foreground[bottom:,round(w*.3):round(w*.7)][::-1])
     frame_left=depth(foreground[round(h*.3):round(h*.7),:left].T)

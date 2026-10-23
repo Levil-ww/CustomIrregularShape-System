@@ -44,6 +44,30 @@ def spec():
     return DesignSpec(diameter_cm=139,height_cm=87,straight_cm=108,shape_mode='arc',border=BorderSpec(0,0,0),dpi=30)
 
 
+@pytest.mark.parametrize('factor',[1,3])
+def test_patterned_inset_keeps_complete_beads_beyond_solid_border(tmp_path,factor):
+    image=Image.new('RGB',(600,400),'black')
+    draw=ImageDraw.Draw(image)
+    background=(255,241,228)
+    draw.rectangle((12,12,587,387),fill=background)
+    for x in range(16,585,8):
+        for y in (12,387):
+            draw.ellipse((x-3,y-3,x+3,y+3),fill=(230,198,158),outline='black')
+    for y in range(16,385,8):
+        for x in (12,587):
+            draw.ellipse((x-3,y-3,x+3,y+3),fill=(230,198,158),outline='black')
+    draw.rectangle((50,60,549,339),fill='black')
+    for y in range(65,330,25):
+        for x in range(55,540,30):
+            draw.ellipse((x,y,x+10,y+12),outline=(230,198,158),width=2)
+    source=material(tmp_path,image.resize((600*factor,400*factor),Image.Resampling.NEAREST),'牡丹织锦')
+    layout=source.source_layout
+    assert layout.patterned_inset is not None
+    assert layout.border_depth_px>=16*factor, '圆点末端不能因一行占比低而被截掉'
+    left,top,right,bottom=layout.content_box_px
+    assert min(left,top,600*factor-right,400*factor-bottom)>=16*factor, '四个方向都必须保留完整圆点'
+
+
 def test_patterned_inset_keeps_its_height_and_follows_curved_contour(tmp_path):
     source=material(tmp_path,patterned_source(),'素缕花肆')
     assert getattr(source.source_layout,'patterned_inset',None) is not None
