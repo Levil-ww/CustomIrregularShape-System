@@ -46,7 +46,7 @@ def _texture_content_box(layout, artwork):
     return a+left, b+top, c-right, d-bottom
 
 
-def adapt_texture_inset(layout):
+def adapt_texture_inset(layout, *, dark_panel_fallback=False):
     """Curve a verified texture rectangle and retain its clean source pixels."""
     artwork = layout.framed_artwork
     if artwork is None and max(layout.width_px, layout.height_px) > 2400:
@@ -72,6 +72,8 @@ def adapt_texture_inset(layout):
         artwork = detect_rectangular_artwork(Image.fromarray(layout.image),
                                              layout.content_box_px, split_texture=True)
         if artwork is None:
+            if dark_panel_fallback:
+                return _adapt_dark_texture_panel(layout)
             return layout
         layout = replace(layout, framed_artwork=artwork)
     box = _texture_content_box(layout, artwork)
@@ -84,6 +86,48 @@ def adapt_texture_inset(layout):
     frame = ContouredFrame(box, np.empty((0, 1, 3), dtype=np.uint8), inset, uniform_texture=True)
     return replace(layout, contoured_frame=frame,
         report=layout.report + '；中央色块随弧形，纹理等比铺入，保留浅色外层间距')
+
+
+def _adapt_dark_texture_panel(layout):
+    """Recognize a filled dark panel over four verified light source margins."""
+    probe = Image.fromarray(layout.image)
+    probe.thumbnail((1200,1200),Image.Resampling.LANCZOS)
+    pixels = np.asarray(probe)
+    h,w = pixels.shape[:2]
+    sx,sy = layout.width_px/w,layout.height_px/h
+    left,top,right,bottom = (round(v/r) for v,r in zip(layout.content_box_px,(sx,sy,sx,sy)))
+    dark = np.max(pixels,axis=2)<150
+    pad = max(2,round(min(w,h)*.005))
+    found=[]
+    for (a,b,c,d),count in _components(dark):
+        if not (w*.4<c-a<w and h*.3<d-b<h and
+                min(a-left,b-top,right-c,bottom-d)>max(2*pad,min(w,h)*.025) and
+                count/((c-a)*(d-b))>.9):
+            continue
+        bands=(dark[b:b+pad,a+pad:c-pad],dark[d-pad:d,a+pad:c-pad],
+               dark[b+pad:d-pad,a:a+pad].T,dark[b+pad:d-pad,c-pad:c].T)
+        if any(not band.size or band.mean(axis=1).max()<.9 for band in bands):
+            continue
+        margins=(pixels[top+pad:b-pad,a:c],pixels[d+pad:bottom-pad,a:c],
+                 pixels[b:d,left+pad:a-pad],pixels[b:d,c+pad:right-pad])
+        if any(not margin.size for margin in margins):
+            continue
+        outer=np.array([np.median(m.reshape(-1,3),axis=0) for m in margins])
+        centre=np.median(pixels[b+pad:d-pad,a+pad:c-pad].reshape(-1,3),axis=0)
+        if np.max(np.ptp(outer,axis=0))>35 or np.min(np.max(outer-centre,axis=1))<45:
+            continue
+        box=tuple(round(v*r) for v,r in zip((a,b,c,d),(sx,sy,sx,sy)))
+        artwork=_textured_rectangle(Image.fromarray(layout.image),pixels,(a,b,c,d),
+                                    layout.content_box_px,sx,sy,split_texture=True)
+        native_margins=artwork is None
+        if artwork is None:
+            artwork=FramedArtwork(box,layout.content_box_px,layout.image[:1,:1],(0,0),native_background=True)
+        inset=(box[1]+layout.height_px-box[3])/2
+        frame=ContouredFrame(box,np.empty((0,1,3),dtype=np.uint8),inset,
+                             uniform_texture=True,native_margins=native_margins)
+        found.append(replace(layout,framed_artwork=artwork,contoured_frame=frame,
+            report=layout.report+'；中央色块随弧形，纹理等比铺入，保留原四侧背景'))
+    return found[0] if len(found)==1 else layout
 
 
 def adapt_outlined_texture_inset(layout):

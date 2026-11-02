@@ -158,7 +158,7 @@ def _prepare(material, preview):
         if pattern == '哥特玫瑰':
             layout = adapt_contoured_frame(layout)
         elif pattern in ('闲叙青釉', '闲叙邂逅'):
-            layout = adapt_texture_inset(layout)
+            layout = adapt_texture_inset(layout,dark_panel_fallback=pattern=='闲叙青釉')
         elif pattern in ('闲叙浅川', '闲叙素年'):
             layout = adapt_outlined_texture_inset(layout)
         return PreparedMaterial(layout.image, layout.strip, material, layout)

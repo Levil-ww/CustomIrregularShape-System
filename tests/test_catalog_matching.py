@@ -119,3 +119,23 @@ def test_decorative_separator_is_normalized_for_other_patterns(separator):
     parsed = parse_filename(name)
     assert parsed.pattern == '闲叙素年'
     assert parsed.stem == name[:-4], '归一化花型后仍应保留原始文件名'
+
+
+@pytest.mark.parametrize('source_name',['闲叙青釉','闲叙·青釉','闲序青釉','闲序·青釉'])
+@pytest.mark.parametrize('target_name',['闲叙青釉','闲叙·青釉','闲序青釉','闲序·青釉'])
+def test_celadon_spelling_aliases_share_the_same_catalog_group(tmp_path,source_name,target_name):
+    source=tmp_path/f'双面格-定制-定制尺寸-{source_name};85x137cm.jpg'
+    source.touch()
+    target_stem=f'双面格-定制-定制尺寸-{target_name};85x133cm'
+    target=parse_filename(target_stem)
+    assert target.pattern=='闲叙青釉'
+    assert target.stem==target_stem,'输出文件名应保留用户原始写法'
+    assert (target.width_cm,target.height_cm)==(133,85)
+    match=match_material(target,tmp_path)
+    assert match.path==str(source)
+    assert match.source.pattern=='闲叙青釉'
+
+
+@pytest.mark.parametrize('name',['闲序素年','闲序浅川','闲序青釉2'])
+def test_celadon_spelling_alias_does_not_rename_other_patterns(name):
+    assert parse_filename(f'{name};85x133cm').pattern==name

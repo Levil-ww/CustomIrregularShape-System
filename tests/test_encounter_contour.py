@@ -21,7 +21,8 @@ def source():
     return image
 
 
-@pytest.mark.parametrize('pattern', ['闲叙青釉', '闲叙・青釉', '闲叙·邂逅', '闲叙邂逅'])
+@pytest.mark.parametrize('pattern', ['闲叙青釉', '闲叙・青釉', '闲序青釉', '闲序·青釉',
+                                    '闲序.青釉', '闲叙·邂逅', '闲叙邂逅'])
 @pytest.mark.parametrize('mode', ['circular', 'arc'])
 def test_texture_side_follows_curved_inset(tmp_path, pattern, mode):
     path = tmp_path / f'双面格-定制-定制尺寸-{pattern};84x140cm.png'
@@ -138,6 +139,37 @@ def test_encounter_name_without_verified_picture_keeps_original_layout(tmp_path)
     assert prepare(MaterialSpec(str(path)), preview=True).source_layout.contoured_frame is None
 
 
+@pytest.mark.parametrize('pattern',['闲叙青釉','闲序青釉','闲序·青釉'])
+@pytest.mark.parametrize('mode',['arc','circular'])
+def test_celadon_dark_panel_with_nonperiodic_background_follows_arc(tmp_path,pattern,mode):
+    rng=np.random.default_rng(38)
+    values=rng.integers(170,241,(360,600,1),dtype=np.uint8)
+    pixels=np.repeat(values,3,axis=2)
+    values=rng.integers(35,85,(240,490,1),dtype=np.uint8)
+    pixels[60:300,55:545]=np.concatenate((values,values+15,values+5),axis=2)
+    image=Image.fromarray(pixels)
+    ImageDraw.Draw(image).rectangle((0,0,599,359),outline='black',width=10)
+    path=tmp_path/f'{pattern};85x137cm.png'
+    image.save(path)
+    material=prepare(MaterialSpec(str(path)),preview=True)
+    assert material.source_layout.contoured_frame is not None, '深色中央纹理应识别为内框'
+    design=DesignSpec(diameter_cm=140,height_cm=84,straight_cm=100,
+                      shape_mode=mode,border=BorderSpec(0,0,0))
+    rendered=np.asarray(render_source(design,material,max_side=1000))
+    from shape_crop.core.geometry import create_shape
+    from shape_crop.core.content_mapping import ContentMapping
+    layout=material.source_layout
+    inner=create_shape(design).inset(layout.contoured_frame.inset_px*
+                                     ContentMapping.source_scale(layout,140,84))
+    for y in (-15,0,15):
+        side=getattr(inner,'center',0)+np.sqrt(inner.radius**2-y**2)
+        row=round((y/84+.5)*rendered.shape[0]-.5)
+        for sign in (-1,1):
+            for offset,dark in ((-2,True),(2,False)):
+                col=round((sign*(side+offset)/140+.5)*rendered.shape[1]-.5)
+                assert (rendered[row,col,1]<140)==dark,'内外纹理应沿弧形分界'
+
+
 @pytest.mark.parametrize('pattern', ['闲叙青釉', '闲叙邂逅'])
 @pytest.mark.parametrize('straight', [100, 102])
 def test_semicircular_sides_keep_background_around_texture_panel(tmp_path, pattern, straight):
@@ -191,3 +223,17 @@ def test_native_fallback_keeps_flat_background_colour():
     pixels = np.asarray(render_source(design, material, max_side=700))
     np.testing.assert_array_equal(pixels[45, 350, :3], (235, 225, 205),
                                   err_msg='原分辨率回退不能把浅色外层换成黑色描边')
+
+@pytest.mark.parametrize('width,height', [(600, 600), (1000, 250), (1800, 180)])
+def test_celadon_dark_panel_recognition_for_varied_source_proportions(width, height):
+    from shape_crop.services.layout_analysis import analyze_layout
+    from shape_crop.services.contoured_frame import _adapt_dark_texture_panel
+    rng = np.random.default_rng(52)
+    values = rng.integers(170, 241, (height, width, 1), dtype=np.uint8)
+    pixels = np.repeat(values, 3, axis=2)
+    margin = round(min(width, height) * .1)
+    pixels[margin:height-margin, margin:width-margin] = (45, 65, 50)
+    image = Image.fromarray(pixels)
+    ImageDraw.Draw(image).rectangle((0, 0, width-1, height-1), outline='black', width=4)
+    layout = _adapt_dark_texture_panel(analyze_layout(image))
+    assert layout.contoured_frame is not None, '不同长宽比的青釉内框都应识别'
