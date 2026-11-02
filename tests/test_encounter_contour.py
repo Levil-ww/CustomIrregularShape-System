@@ -22,7 +22,8 @@ def source():
 
 
 @pytest.mark.parametrize('pattern', ['闲叙青釉', '闲叙・青釉', '闲序青釉', '闲序·青釉',
-                                    '闲序.青釉', '闲叙·邂逅', '闲叙邂逅'])
+                                    '闲序.青釉', '闲叙·邂逅', '闲叙邂逅',
+                                    '闲序邂逅', '闲序·邂逅', '闲序・邂逅', '闲序.邂逅'])
 @pytest.mark.parametrize('mode', ['circular', 'arc'])
 def test_texture_side_follows_curved_inset(tmp_path, pattern, mode):
     path = tmp_path / f'双面格-定制-定制尺寸-{pattern};84x140cm.png'

@@ -136,6 +136,19 @@ def test_celadon_spelling_aliases_share_the_same_catalog_group(tmp_path,source_n
     assert match.source.pattern=='闲叙青釉'
 
 
-@pytest.mark.parametrize('name',['闲序素年','闲序浅川','闲序青釉2'])
+@pytest.mark.parametrize('name',['闲序素年','闲序浅川','闲序青釉2','闲序邂逅2'])
 def test_celadon_spelling_alias_does_not_rename_other_patterns(name):
     assert parse_filename(f'{name};85x133cm').pattern==name
+
+
+@pytest.mark.parametrize('source_name', ['闲叙邂逅', '闲叙·邂逅', '闲序邂逅', '闲序·邂逅', '闲序・邂逅', '闲序.邂逅'])
+@pytest.mark.parametrize('target_name', ['闲叙邂逅', '闲叙·邂逅', '闲序邂逅', '闲序·邂逅', '闲序・邂逅', '闲序.邂逅'])
+def test_encounter_spelling_aliases_share_catalog_group(tmp_path, source_name, target_name):
+    source = tmp_path / f'双面格-定制-定制尺寸-{source_name};80x180cm.jpg'
+    source.touch()
+    stem = f'双面格-定制-定制尺寸-{target_name};84x136cm'
+    target = parse_filename(stem)
+    match = match_material(target, tmp_path)
+    assert target.pattern == match.source.pattern == '闲叙邂逅'
+    assert target.stem == stem
+    assert match.path == str(source)

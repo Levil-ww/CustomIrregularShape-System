@@ -41,10 +41,9 @@ def parse_filename(value):
     # Decorative middle dots and spacing do not create a different pattern.
     # Keep the original stem for the customer's output filename.
     pattern = re.sub(r'[·・\s]+', '', pattern)
-    # Celadon is catalogued with both spellings. Canonicalize only this
-    # verified alias so matching and material preparation share one route.
-    if re.fullmatch(r'闲序\.?青釉', pattern):
-        pattern = '闲叙青釉'
+    # These verified aliases share matching and material preparation routes.
+    if re.fullmatch(r'闲序\.?(?:青釉|邂逅)', pattern):
+        pattern = pattern.replace('闲序', '闲叙', 1).replace('.', '')
     if re.fullmatch(r'闲叙\.(?:青釉|邂逅|浅川|素年)', pattern):
         pattern = pattern.replace('.', '')
     if not pattern:
