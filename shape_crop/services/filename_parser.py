@@ -41,7 +41,7 @@ def parse_filename(value):
     # Decorative middle dots and spacing do not create a different pattern.
     # Keep the original stem for the customer's output filename.
     pattern = re.sub(r'[·・\s]+', '', pattern)
-    if re.fullmatch(r'闲叙\.(?:青釉|邂逅)', pattern):
+    if re.fullmatch(r'闲叙\.(?:青釉|邂逅|浅川|素年)', pattern):
         pattern = pattern.replace('.', '')
     if not pattern:
         raise ValueError('文件名中缺少花型名称')

@@ -114,7 +114,7 @@ def detect_framed_artwork(image, frame, rectangle_mask=None, rectangle_boxes=Non
     return candidates[0] if len(candidates) == 1 else None
 
 
-def detect_rectangular_artwork(image, frame):
+def detect_rectangular_artwork(image, frame, *, split_texture=False):
     """Recognize complete contrasting rectangles without component connectivity."""
     probe = image.copy()
     probe.thumbnail((1200, 1200))
@@ -143,7 +143,7 @@ def detect_rectangular_artwork(image, frame):
         for y, row in enumerate(mask):
             changes = np.diff(np.r_[False, row, False].astype(np.int8))
             for a, c in zip(np.flatnonzero(changes == 1), np.flatnonzero(changes == -1)):
-                if w * .4 < c - a < w * .9:
+                if w * .4 < c - a < w * (.98 if split_texture else .9):
                     spans.setdefault((int(a), int(c)), []).append(y)
         boxes = []
         for (a, c), rows in spans.items():
@@ -181,7 +181,8 @@ def detect_rectangular_artwork(image, frame):
             # Find its actual boundary against the outer frame independently.
             if np.max(np.abs(colour-background)) < 24:
                 continue
-            textured = _textured_rectangle(image, pixels, (a,b,c,d), frame, sx, sy)
+            textured = _textured_rectangle(image, pixels, (a,b,c,d), frame, sx, sy,
+                                           split_texture=split_texture)
             if textured is not None:
                 return textured
             near = np.max(np.abs(pixels.astype(float) - background), axis=2) < 12
@@ -213,11 +214,13 @@ def detect_rectangular_artwork(image, frame):
                          first.native_background, first.background_colour, clear_box)
 
 
-def _textured_rectangle(image, pixels, box, frame, sx, sy):
+def _textured_rectangle(image, pixels, box, frame, sx, sy, *, split_texture=False):
     """Accept mildly antialiased periodic backgrounds with a clean source tile."""
     a,b,c,d = box
     left,top,right,bottom = [round(v/r) for v,r in zip(frame,(sx,sy,sx,sy))]
-    pad = 4
+    # The named texture fallback validates every phase below. One bounded
+    # probe pixel still excludes the edge without discarding a narrow moat.
+    pad = 1 if split_texture else 4
     regions = (pixels[top+pad:b-pad,left+pad:right-pad], pixels[d+pad:bottom-pad,left+pad:right-pad],
                pixels[top+pad:bottom-pad,left+pad:a-pad].transpose(1,0,2),
                pixels[top+pad:bottom-pad,c+pad:right-pad].transpose(1,0,2))
@@ -234,10 +237,10 @@ def _textured_rectangle(image, pixels, box, frame, sx, sy):
     horizontal, vertical = periods(regions[0],regions[1]), periods(regions[2],regions[3])
     ox,oy = left+pad,top+pad
     fits = [(ex+ey, px, py) for ex,px in horizontal for ey,py in vertical
-            if (ox+px<=a-pad or oy+py<=b-pad) and ox+px<right-pad and oy+py<bottom-pad]
+            if (split_texture or ox+px<=a-pad or oy+py<=b-pad)
+            and ox+px<right-pad and oy+py<bottom-pad]
     if not fits:
         return None
-    _,px,py = min(fits)
     # The whole saved tile lies in proven background, never in the picture.
     full=np.asarray(image)
     origin=(round(ox*sx),round(oy*sy))
@@ -252,13 +255,60 @@ def _textured_rectangle(image, pixels, box, frame, sx, sy):
     padx, pady = int(np.ceil(pad*sx)), int(np.ceil(pad*sy))
     horizontal = full[ft+pady:bb-pady, fl+padx:fr-padx]
     vertical = full[ft+pady:fb-pady, fl+padx:aa-padx].transpose(1,0,2)
-    px = refine(horizontal, round(px*sx), sx)
-    py = refine(vertical, round(py*sy), sy)
-    if not ((origin[0]+px <= aa-padx or origin[1]+py <= bb-pady)
-            and origin[0]+px < fr-padx and origin[1]+py < fb-pady):
+    candidates = sorted(fits)[:32] if split_texture else [min(fits)]
+    refined_x, refined_y = {}, {}
+    tile = None
+    for _,px,py in candidates:
+        if px not in refined_x:
+            refined_x[px] = refine(horizontal, round(px*sx), sx)
+        if py not in refined_y:
+            refined_y[py] = refine(vertical, round(py*sy), sy)
+        px, py = refined_x[px], refined_y[py]
+        if not (origin[0]+px < fr-padx and origin[1]+py < fb-pady):
+            continue
+        if origin[0]+px <= aa-padx or origin[1]+py <= bb-pady:
+            tile=full[origin[1]:origin[1]+py,origin[0]:origin[0]+px].copy()
+        elif split_texture:
+            tile = _split_texture_tile(full, (fl+padx, ft+pady, fr-padx, fb-pady),
+                                       (aa-padx, bb-pady, cc+padx, dd+pady), origin, px, py)
+        if tile is not None:
+            break
+    if tile is None:
         return None
-    tile=full[origin[1]:origin[1]+py,origin[0]:origin[0]+px].copy()
     # Contrasting rectangles have no outer outline to preserve. Expanding this
     # crop would carry a second, smaller ring of background ornament.
     bounds=tuple(float(v*r) for v,r in zip((a,b,c,d),(sx,sy,sx,sy)))
     return FramedArtwork(bounds,frame,tile,origin,True,None)
+
+
+def _split_texture_tile(pixels, frame, excluded, origin, px, py):
+    """Collect every periodic phase from proven background, never the panel."""
+    left, top, right, bottom = frame
+    a, b, c, d = excluded
+    ox, oy = origin
+    xs = ox + np.arange(px)
+    ys = oy + np.arange(py)
+    # Prefer full rows above/below the panel. Fill remaining phases from sides.
+    upper = top + (ys-top) % py
+    lower = d + (ys-d) % py
+    valid_rows = (upper < b) | (lower < bottom)
+    row_sources = np.where(upper < b, upper, lower)
+    tile = np.empty((py, px, 3), dtype=np.uint8)
+    tile[valid_rows] = pixels[row_sources[valid_rows, None], xs[None, :]]
+    if not np.all(valid_rows):
+        west = left + (xs-left) % px
+        east = c + (xs-c) % px
+        if not np.all((west < a) | (east < right)):
+            return None
+        columns = np.where(west < a, west, east)
+        tile[~valid_rows] = pixels[ys[~valid_rows, None], columns[None, :]]
+    # Opposite margins must agree in phase as well as period. Reject
+    # incomplete or inconsistent tiles instead of stretching the background.
+    for x0,y0,x1,y1 in ((left,top,right,b), (left,d,right,bottom),
+                         (left,top,a,bottom), (c,top,right,bottom)):
+        xx = np.linspace(x0,x1-1,min(64,x1-x0)).astype(int)
+        yy = np.linspace(y0,y1-1,min(32,y1-y0)).astype(int)
+        expected = tile[(yy[:,None]-oy)%py,(xx[None,:]-ox)%px]
+        if np.mean(np.abs(expected.astype(float)-pixels[yy[:,None],xx[None,:]])) > 10:
+            return None
+    return tile

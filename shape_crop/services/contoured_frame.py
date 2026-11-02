@@ -4,6 +4,8 @@ import numpy as np
 from PIL import Image
 from shape_crop.services.texture_period import extract_period, extract_dark_period
 from shape_crop.services.layout_analysis import analyze_layout
+from shape_crop.services.framed_artwork import FramedArtwork, detect_rectangular_artwork, _textured_rectangle
+from shape_crop.services.floating_artwork import _components
 
 
 @dataclass(frozen=True)
@@ -11,6 +13,9 @@ class ContouredFrame:
     box: tuple
     stroke: np.ndarray
     inset_px: float
+    uniform_texture: bool = False
+    repeat_stroke: bool = False
+    native_margins: bool = False
 
 
 def _texture_content_box(layout, artwork):
@@ -62,7 +67,13 @@ def adapt_texture_inset(layout):
                 origin=(ox, oy), tile=tile)
             layout = replace(layout, framed_artwork=artwork)
     if artwork is None:
-        return layout
+        # Called only for the two named texture insets. A long source may have
+        # no single clear margin large enough for the complete background tile.
+        artwork = detect_rectangular_artwork(Image.fromarray(layout.image),
+                                             layout.content_box_px, split_texture=True)
+        if artwork is None:
+            return layout
+        layout = replace(layout, framed_artwork=artwork)
     box = _texture_content_box(layout, artwork)
     left, top, right, bottom = box
     if not (0 < left < right < layout.width_px and 0 < top < bottom < layout.height_px):
@@ -70,9 +81,69 @@ def adapt_texture_inset(layout):
     inset = (top + layout.height_px - bottom) / 2
     # These textures meet without an inner outline. An empty stroke preserves
     # their original boundary instead of inventing a line from the fill.
-    frame = ContouredFrame(box, np.empty((0, 1, 3), dtype=np.uint8), inset)
+    frame = ContouredFrame(box, np.empty((0, 1, 3), dtype=np.uint8), inset, uniform_texture=True)
     return replace(layout, contoured_frame=frame,
-        report=layout.report + '；内侧纹理平滑随弧，中央保持比例，保留浅色外层间距')
+        report=layout.report + '；中央色块随弧形，纹理等比铺入，保留浅色外层间距')
+
+
+def adapt_outlined_texture_inset(layout):
+    """Curve a verified pale texture panel and its complete dark inner trim."""
+    image = Image.fromarray(layout.image)
+    probe = image.copy()
+    probe.thumbnail((1200,1200),Image.Resampling.LANCZOS)
+    pixels = np.asarray(probe)
+    h,w = pixels.shape[:2]
+    sx,sy = layout.width_px/w,layout.height_px/h
+    candidates = []
+    for (a,b,c,d),_ in _components(np.max(pixels,axis=2)<100):
+        if not (w*.4<c-a<w*.96 and h*.3<d-b<h*.92 and
+                min(a,b,w-c,h-d)>min(w,h)*.025):
+            continue
+        # Connected corners alone are insufficient: prove a full dark line
+        # on each side, with only a thin ornament footprint around it.
+        aa,bb,cc,dd = (round(v*r) for v,r in zip((a,b,c,d),(sx,sy,sx,sy)))
+        native = layout.image
+        limit = max(4,round(min(layout.width_px,layout.height_px)*.035))
+        rows = (native[bb:bb+limit,aa+(cc-aa)//4:cc-(cc-aa)//4],
+                native[dd-limit:dd,aa+(cc-aa)//4:cc-(cc-aa)//4][::-1],
+                native[bb+(dd-bb)//4:dd-(dd-bb)//4,aa:aa+limit].transpose(1,0,2),
+                native[bb+(dd-bb)//4:dd-(dd-bb)//4,cc-limit:cc][:,::-1].transpose(1,0,2))
+        extents = []
+        for region in rows:
+            coverage = np.mean(np.max(region,axis=2)<120,axis=1)
+            core = np.flatnonzero(coverage>.9)
+            active = np.flatnonzero(coverage>.02)
+            if not core.size or not active.size or active[-1]>=limit-2:
+                break
+            extents.append((max(0,int(active[0])-1),int(active[-1])+2))
+        if len(extents)!=4:
+            continue
+        artwork = _textured_rectangle(image,pixels,(a,b,c,d),layout.content_box_px,sx,sy,
+                                      split_texture=True)
+        native_margins = artwork is None
+        if artwork is None:
+            # The pale herringbone can have a repeat taller than the exposed
+            # moat. Retain all four native margins instead of fabricating a tile.
+            artwork = FramedArtwork((aa,bb,cc,dd),layout.content_box_px,
+                                    native[:1,:1],(0,0),native_background=True)
+        top,bottom,left,right = extents
+        box = (aa+left[1],bb+top[1],cc-right[1],dd-bottom[1])
+        if box[2]<=box[0] or box[3]<=box[1]:
+            continue
+        stroke_start = bb+top[0]
+        region = native[stroke_start:box[1],aa+(cc-aa)//5:cc-(cc-aa)//5]
+        stroke,period = extract_dark_period(region)
+        if not period:
+            ink = np.max(region,axis=2)<120
+            if np.any(np.std(ink,axis=1)>.1):
+                continue
+            stroke = np.median(region,axis=1).astype(np.uint8)[:,None,:]
+        inset = (stroke_start+layout.height_px-(dd-bottom[0]))/2
+        frame = ContouredFrame(box,stroke,inset,uniform_texture=True,
+                               repeat_stroke=bool(period),native_margins=native_margins)
+        candidates.append(replace(layout,framed_artwork=artwork,contoured_frame=frame,
+            report=layout.report+'；中央纹理等比铺入弧形内框，保留原细线及周期装饰'))
+    return candidates[0] if len(candidates)==1 else layout
 
 
 def adapt_contoured_frame(layout):

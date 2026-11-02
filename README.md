@@ -1,4 +1,4 @@
-# 异形智裁 0.4.2
+# 异形智裁 0.4.3
 
 独立 Python / PyQt5 桌面程序，支持目标文件名匹配、精确截圆、完整圆及同心内圆填充。保持 models / core / services / workers / gui 分层，不依赖 SmartShapeCrop 运行。
 
@@ -16,9 +16,9 @@
 
 ## 启动
 
-Windows 用户可直接运行 `dist/异形智裁.exe`，或解压 `dist/异形智裁-0.4.2-20261022-Windows-x64.zip` 后运行其中的 EXE。无需安装 Python，图库由用户自行选择。升级说明见 `docs/更新说明_0.4.2.md`。开发环境按下面方式启动。
+Windows 用户可直接运行 `dist/异形智裁.exe`，或解压 `dist/异形智裁-0.4.3-20261102-Windows-x64.zip` 后运行其中的 EXE。无需安装 Python，图库由用户自行选择。升级说明见 `docs/更新说明_0.4.3.md`。开发环境按下面方式启动。
 
-可以只向用户提供一个 EXE。0.4.2 包含青芜织序多层边框、塞纳时光多余横线及克罗印花双内线修复；旧的 0.4.1 安装包不会自动更新。`dist/` 中的安装包为本地生成文件，不随 Git 推送。
+可以只向用户提供一个 EXE。0.4.3 包含牡丹织锦圆点边框及闲叙系列内框更新；旧安装包不会自动更新。`dist/` 中的安装包为本地生成文件，不随 Git 推送。
 
 ```powershell
 python -m pip install -r requirements.txt
