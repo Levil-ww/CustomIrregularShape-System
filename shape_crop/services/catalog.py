@@ -10,6 +10,7 @@ from shape_crop.core.renderer import RenderCancelled
 
 
 MAX_RATIO_ERROR = math.log(1.05)
+MIN_SOURCE_DIMENSION_RATIO = .80
 
 
 @dataclass(frozen=True)
@@ -217,6 +218,11 @@ def match_material(target, directory, cancelled=None, progress=None, *, verify=T
         candidates.append((ratio_error, size_error, path, parsed))
     if not candidates:
         raise ValueError(f'图库中未找到同材质、同花型“{target.pattern}”的矩形 JPG；可在高级选项指定素材')
+    candidates = [item for item in candidates
+                  if item[3].width_cm >= target.width_cm * MIN_SOURCE_DIMENSION_RATIO
+                  and item[3].height_cm >= target.height_cm * MIN_SOURCE_DIMENSION_RATIO]
+    if not candidates:
+        raise ValueError('未找到尺寸足够的同材质、同花型素材：素材宽、高均须达到目标尺寸的 80%；请补充尺寸更接近的素材，或在高级选项手动指定素材')
     def rank(item):
         ratio, size, path, _ = item
         if ratio <= MAX_RATIO_ERROR:

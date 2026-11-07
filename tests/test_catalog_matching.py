@@ -13,12 +13,11 @@ from shape_crop.services.workflow import resolve_request
     ('90x138', ['60x92', '93x140'], '93x140'),
     ('90x138', ['72x110.4', '93x140'], '93x140'),
     ('90x138', ['90x120', '75x115'], '75x115'),
-    ('90x138', ['60x92'], '60x92'),
     # At exactly 5%, size wins; just outside it, the eligible candidate wins.
     ('100x100', ['105x100', '80x80'], '105x100'),
     ('100x100', ['105.001x100', '80x80'], '80x80'),
-    # With no eligible candidate, ratio takes priority over size.
-    ('100x100', ['100x80', '79.5x75'], '79.5x75'),
+    # Undersized candidates are excluded before ratio ranking.
+    ('100x100', ['100x80', '79.5x75'], '100x80'),
 ])
 def test_size_priority_with_ratio_limit_and_fallback(tmp_path, target_size, sizes, expected):
     for size in sizes:
@@ -28,12 +27,9 @@ def test_size_priority_with_ratio_limit_and_fallback(tmp_path, target_size, size
 
 
 @pytest.mark.parametrize(('size', 'small', 'fallback'), [
-    ('60x92', True, False),
     ('72x110.4', False, False),
     ('93x140', False, False),
     ('90x120', False, True),
-    ('50x100', True, True),
-    ('71.9x138', True, True),
 ])
 def test_workflow_warns_without_rejecting_material(tmp_path, size, small, fallback):
     source = tmp_path / f'花幔;{size}cm.jpg'
@@ -42,6 +38,30 @@ def test_workflow_warns_without_rejecting_material(tmp_path, size, small, fallba
     assert design.material.path == str(source)
     assert ('素材尺寸偏小' in detail) == small
     assert ('已使用兜底素材' in detail) == fallback
+
+
+@pytest.mark.parametrize('size', ['60x92', '50x100', '71.9x138'])
+def test_undersized_source_requires_larger_material(tmp_path, size):
+    (tmp_path / f'花幔;{size}cm.jpg').touch()
+    with pytest.raises(ValueError, match='素材宽、高均须达到目标尺寸的 80%'):
+        resolve_request(ProductRequest('花幔;90x138cm', str(tmp_path)))
+
+
+def test_enamel_prefers_adequate_material_over_small_ratio_match(tmp_path):
+    small = tmp_path / '吸水皮革-定制-定制尺寸-岁月珐琅;22x46cm.jpg'
+    adequate = tmp_path / '吸水皮革-定制-定制尺寸-岁月珐琅;60x100cm.jpg'
+    small.touch()
+    adequate.touch()
+    target = parse_filename('吸水皮革-定制-定制尺寸-岁月珐琅;61x124.8cm')
+    assert match_material(target, tmp_path).path == str(adequate)
+
+
+def test_no_material_large_enough_does_not_silently_upscale(tmp_path):
+    for size in ('22x46', '60x100'):
+        (tmp_path / f'吸水皮革-定制-定制尺寸-岁月珐琅;{size}cm.jpg').touch()
+    target = parse_filename('吸水皮革-定制-定制尺寸-岁月珐琅;61x164.8cm')
+    with pytest.raises(ValueError, match='尺寸足够'):
+        match_material(target, tmp_path)
 
 
 def test_workflow_includes_exactly_five_percent_without_fallback_warning(tmp_path):
@@ -82,13 +102,14 @@ def test_standard_library_name_uses_pattern_and_dimensions_after_separator(separ
     assert (parsed.width_cm, parsed.height_cm) == (140, 80)
 
 
-def test_standard_encounter_source_is_not_lost_to_long_strip_fallback(tmp_path):
+def test_encounter_does_not_choose_an_undersized_standard_or_strip(tmp_path):
     standard = tmp_path / '双面格-标准-80x100-闲叙邂逅;80x100.jpg'
     strip = tmp_path / '双面格-定制-定制尺寸-闲叙邂逅;48x200CM.jpg'
     standard.touch()
     strip.touch()
     target = parse_filename('双面格-定制-裁剪有图-闲叙邂逅;84x136cm')
-    assert match_material(target, tmp_path).path == str(standard)
+    with pytest.raises(ValueError, match='尺寸足够'):
+        match_material(target, tmp_path)
 
 
 @pytest.mark.parametrize('pattern', ['闲叙・邂逅', '闲叙·邂逅', '闲叙.邂逅'])

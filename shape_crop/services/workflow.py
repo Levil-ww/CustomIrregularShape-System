@@ -37,7 +37,7 @@ def resolve_request(request, cancelled=None, status=None, catalog_session=None):
                 match.source.height_cm < target.height_cm * .80):
             detail += '\n提示：素材尺寸偏小，至少一边不足目标尺寸的 80%，放大后清晰度可能降低'
         if match.ratio_error > MAX_RATIO_ERROR:
-            detail += '\n提示：未找到比例差 ≤5% 的素材，已使用兜底素材，花纹裁剪可能增加'
+            detail += '\n提示：未找到尺寸足够且比例差 ≤5% 的素材，已使用兜底素材，花纹裁剪可能增加'
     design = replace(design, material=MaterialSpec(path=path))
     design.validate()
     return design, f'{detail}\n素材：{path}'
