@@ -197,3 +197,18 @@ def test_arc_ticks_near_corner_span_whole_decoration_depth(mode):
             beige = values[..., 2] < 195
             assert not np.any(np.any(white, axis=0) & np.any(beige, axis=0)), '侧弧接头出现只画了一半的条纹'
             assert np.count_nonzero(np.all(white, axis=0)) > 10, '不能通过删除角部全部条纹来规避残缺'
+
+@pytest.mark.parametrize('width,height,chord', [(164.8, 61, 135), (124.8, 61, 101), (200, 70, 170)])
+def test_straight_ticks_continue_between_arc_centres(width, height, chord):
+    from shape_crop.core.geometry import ArcBand
+    from shape_crop.core.source_renderer import _complete_corner_ticks
+    shape = ArcBand(width, height, chord)
+    ring = shape.inset(2)
+    strip = np.full((12, 10, 3), (228, 214, 187), dtype=np.uint8)
+    strip[:, 2:5] = 255
+    x = np.linspace(-shape.center * .8, shape.center * .8, 300)
+    y = np.full_like(x, -shape.half_height + 2)
+    pixels = _complete_corner_ticks(strip, shape, ring, .1, 3,
+        ((228, 214, 187),) * 4, x, y, np.full_like(x, 5), 1, 10)
+    for segment in np.array_split(pixels, 6):
+        assert np.count_nonzero(segment[:, 0] > 250) > 5, '直线段中间不能丢失装饰条纹'

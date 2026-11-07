@@ -2,7 +2,7 @@
 import numpy as np
 from PIL import Image
 from shape_crop.core.geometry import (create_shape, inset_boundary_fraction,
-    clipped_boundary_coordinate, _compute_depth_and_radial, CircularBand)
+    clipped_boundary_coordinate, _compute_depth_and_radial, CircularBand, ArcBand)
 from shape_crop.core.sampling import sample_perimeter_strip, sample_sentence_strip, uniform_strip_band, sample
 from shape_crop.core.content_mapping import ContentMapping
 from shape_crop.core.round_rings import recognize_round_ring, sample_round_rings, is_filled_dot_strip
@@ -246,6 +246,10 @@ def _complete_corner_ticks(strip, shape, ring, scale, inner_depth, colours,
     theta = np.arctan2(y, np.abs(x) - centre)
     radial = shape.radius - np.hypot(np.abs(x) - centre, y)
     on_line = shape.half_height - np.abs(y) <= radial
+    if isinstance(shape, ArcBand):
+        # A supporting circle extends behind each side arc's centre; there
+        # the nearest boundary is the straight segment, not the unused circle.
+        on_line |= np.abs(x) <= centre
     # The innermost band boundary limits every row. With one x transform on
     # straights and one angular transform on arcs, each tick has full length.
     straight_count = max(0, int(np.floor(inner.chord / (period * scale))))
