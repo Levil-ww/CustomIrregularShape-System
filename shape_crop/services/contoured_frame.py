@@ -88,6 +88,42 @@ def adapt_texture_inset(layout, *, dark_panel_fallback=False):
         report=layout.report + '；中央色块随弧形，纹理等比铺入，保留浅色外层间距')
 
 
+def adapt_enamel_inset(layout):
+    """Keep a verified complete ornamental background around the curved panel."""
+    if layout.framed_artwork is None:
+        return layout
+    box = _texture_content_box(layout, layout.framed_artwork)
+    image = Image.fromarray(layout.image)
+    probe = image.copy()
+    probe.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
+    sx, sy = layout.width_px / probe.width, layout.height_px / probe.height
+    pixels = np.asarray(probe)
+    h, w = pixels.shape[:2]
+    sides = (pixels[:, w//4:3*w//4], pixels[::-1, w//4:3*w//4],
+             pixels[h//4:3*h//4].transpose(1, 0, 2),
+             pixels[h//4:3*h//4, ::-1].transpose(1, 0, 2))
+    widths = []
+    for side, ratio in zip(sides, (sy, sy, sx, sx)):
+        ends = np.flatnonzero(np.mean(np.max(side, axis=2) < 35, axis=1) < .9)
+        widths.append(round(ends[0] * ratio) if ends.size else 0)
+    edge = min(widths)
+    clean_edge = (edge > 0 and max(widths) <= edge * 1.15 + 2 and
+                  edge <= layout.strip.shape[0])
+    a, b, c, d = (round(v / r) for v, r in zip(box, (sx, sy, sx, sy)))
+    # Exclude antialiased panel-edge pixels when collecting periodic phases.
+    padding = 4
+    artwork = _textured_rectangle(image, pixels,
+        (a-padding, b-padding, c+padding, d+padding), layout.content_box_px,
+        sx, sy, split_texture=True, verify_ink=True)
+    if artwork is None:
+        return layout
+    artwork = replace(artwork, box=box)
+    if clean_edge:
+        layout = replace(layout, border_depth_px=edge, strip=layout.strip[:edge],
+            content_box_px=(edge, edge, layout.width_px-edge, layout.height_px-edge))
+    return adapt_texture_inset(replace(layout, framed_artwork=artwork))
+
+
 def _adapt_dark_texture_panel(layout):
     """Recognize a filled dark panel over four verified light source margins."""
     probe = Image.fromarray(layout.image)

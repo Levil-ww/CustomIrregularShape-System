@@ -214,7 +214,7 @@ def detect_rectangular_artwork(image, frame, *, split_texture=False):
                          first.native_background, first.background_colour, clear_box)
 
 
-def _textured_rectangle(image, pixels, box, frame, sx, sy, *, split_texture=False):
+def _textured_rectangle(image, pixels, box, frame, sx, sy, *, split_texture=False, verify_ink=False):
     """Accept mildly antialiased periodic backgrounds with a clean source tile."""
     a,b,c,d = box
     left,top,right,bottom = [round(v/r) for v,r in zip(frame,(sx,sy,sx,sy))]
@@ -233,7 +233,12 @@ def _textured_rectangle(image, pixels, box, frame, sx, sy, *, split_texture=Fals
         errors = [max(np.mean(np.abs(v[:,lag:]-v[:,:-lag])) for v in values)
                   for lag in range(3,min(v.shape[1] for v in values)//3)]
         return [(float(errors[i]), i+3) for i in range(1,len(errors)-1)
-                if errors[i]<8 and errors[i]<errors[i-1] and errors[i]<=errors[i+1]]
+                if errors[i]<8 and errors[i]<errors[i-1] and errors[i]<=errors[i+1]
+                and (not verify_ink or all(
+                    np.count_nonzero((np.max(v[:,i+3:],axis=2)<30) !=
+                                     (np.max(v[:,:-(i+3)],axis=2)<30)) <=
+                    .3 * np.count_nonzero(np.max(v[:,:-(i+3)],axis=2)<30)
+                    for v in values))]
     horizontal, vertical = periods(regions[0],regions[1]), periods(regions[2],regions[3])
     ox,oy = left+pad,top+pad
     fits = [(ex+ey, px, py) for ex,px in horizontal for ey,py in vertical
@@ -255,7 +260,7 @@ def _textured_rectangle(image, pixels, box, frame, sx, sy, *, split_texture=Fals
     padx, pady = int(np.ceil(pad*sx)), int(np.ceil(pad*sy))
     horizontal = full[ft+pady:bb-pady, fl+padx:fr-padx]
     vertical = full[ft+pady:fb-pady, fl+padx:aa-padx].transpose(1,0,2)
-    candidates = sorted(fits)[:32] if split_texture else [min(fits)]
+    candidates = sorted(fits)[:512 if verify_ink else 32] if split_texture else [min(fits)]
     refined_x, refined_y = {}, {}
     tile = None
     for _,px,py in candidates:

@@ -11,7 +11,7 @@ from shape_crop.services.layout_analysis import analyze_layout, _straight_outlin
 from shape_crop.services.texture_period import extract_period
 from shape_crop.services.inset_panel import _partial_fade_edges
 from shape_crop.services.filename_parser import parse_filename
-from shape_crop.services.contoured_frame import (adapt_contoured_frame, adapt_texture_inset,
+from shape_crop.services.contoured_frame import (adapt_contoured_frame, adapt_texture_inset, adapt_enamel_inset,
                                                 adapt_outlined_texture_inset)
 
 
@@ -157,6 +157,8 @@ def _prepare(material, preview):
             layout = _align_translucent_layout(layout, reference)
         if pattern == '哥特玫瑰':
             layout = adapt_contoured_frame(layout)
+        elif pattern == '岁月珐琅':
+            layout = adapt_enamel_inset(layout)
         elif pattern in ('闲叙青釉', '闲叙邂逅'):
             layout = adapt_texture_inset(layout,dark_panel_fallback=pattern=='闲叙青釉')
         elif pattern in ('闲叙浅川', '闲叙素年'):
