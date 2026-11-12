@@ -7,7 +7,7 @@ import re
 import numpy as np
 from PIL import Image, ImageOps
 from shape_crop.models.design import MaterialSpec
-from shape_crop.services.layout_analysis import analyze_layout, _straight_outline_rows
+from shape_crop.services.layout_analysis import analyze_layout, _straight_outline_rows, _closed_thin_frame
 from shape_crop.services.texture_period import extract_period
 from shape_crop.services.inset_panel import _partial_fade_edges
 from shape_crop.services.filename_parser import parse_filename
@@ -157,6 +157,8 @@ def _prepare(material, preview):
             layout = _align_translucent_layout(layout, reference)
         if pattern == '哥特玫瑰':
             layout = adapt_contoured_frame(layout)
+        elif pattern == '花幔':
+            layout = _align_huaman_frame(layout)
         elif pattern == '岁月珐琅':
             layout = adapt_enamel_inset(layout)
         elif pattern in ('闲叙青釉', '闲叙邂逅'):
@@ -170,6 +172,33 @@ def _prepare(material, preview):
         content.thumbnail((1800, 1800), Image.Resampling.LANCZOS)
         strip.thumbnail((1800, 500), Image.Resampling.LANCZOS)
     return PreparedMaterial(np.asarray(content), np.asarray(strip), material)
+
+
+def _align_huaman_frame(layout):
+    """Use the proven closed outline when a plain frame scan includes flowers."""
+    if (layout.strip_period_px or layout.strip_is_sentence or layout.corner_gaps is not None or
+            layout.layered_strip is not None or layout.framed_artwork is not None or
+            layout.inset_panel is not None or layout.floating_artwork is not None):
+        return layout
+    image = Image.fromarray(layout.image)
+    probe = image.copy()
+    probe.thumbnail((2400, 2400), Image.Resampling.LANCZOS)
+    frame = _closed_thin_frame(np.asarray(probe))
+    if frame is None:
+        return layout
+    sx, sy = layout.width_px / probe.width, layout.height_px / probe.height
+    left, top, right, bottom = (round(v * r) for v, r in zip(frame, (sx, sy, sx, sy)))
+    if not (0 < top < layout.border_depth_px - max(2, round(sy * 2)) and
+            0 < left < right <= layout.width_px and top < bottom <= layout.height_px):
+        return layout
+    region = _straight_outline_rows(layout.image[:top, left:right])
+    strip, period = extract_period(region)
+    if period:
+        return layout
+    return replace(layout, strip=strip, border_depth_px=top,
+                   content=layout.image[top:bottom, left:right],
+                   content_box_px=(left, top, right, bottom),
+                   report='读取原素材闭合细线边框；中央文字及花纹保留原比例')
 
 
 def _align_translucent_layout(layout, reference):
