@@ -166,11 +166,11 @@ def _adapt_dark_texture_panel(layout):
     return found[0] if len(found)==1 else layout
 
 
-def adapt_outlined_texture_inset(layout):
-    """Curve a verified pale texture panel and its complete dark inner trim."""
+def adapt_outlined_texture_inset(layout, *, probe_side=1200, dark_texture=False):
+    """Curve a verified textured panel and its complete dark inner trim."""
     image = Image.fromarray(layout.image)
     probe = image.copy()
-    probe.thumbnail((1200,1200),Image.Resampling.LANCZOS)
+    probe.thumbnail((probe_side,probe_side),Image.Resampling.LANCZOS)
     pixels = np.asarray(probe)
     h,w = pixels.shape[:2]
     sx,sy = layout.width_px/w,layout.height_px/h
@@ -192,7 +192,9 @@ def adapt_outlined_texture_inset(layout):
         for region in rows:
             coverage = np.mean(np.max(region,axis=2)<120,axis=1)
             core = np.flatnonzero(coverage>.9)
-            active = np.flatnonzero(coverage>.02)
+            # Dark patterned fill can extend below the line threshold; use
+            # the continuous core only for the explicitly selected design.
+            active = np.flatnonzero(coverage>.9 if dark_texture else coverage>.02)
             if not core.size or not active.size or active[-1]>=limit-2:
                 break
             extents.append((max(0,int(active[0])-1),int(active[-1])+2))
@@ -212,10 +214,13 @@ def adapt_outlined_texture_inset(layout):
             continue
         stroke_start = bb+top[0]
         region = native[stroke_start:box[1],aa+(cc-aa)//5:cc-(cc-aa)//5]
+        if dark_texture:
+            # Exclude the first patterned row after the continuous outline.
+            region = region[:-1]
         stroke,period = extract_dark_period(region)
         if not period:
             ink = np.max(region,axis=2)<120
-            if np.any(np.std(ink,axis=1)>.1):
+            if not dark_texture and np.any(np.std(ink,axis=1)>.1):
                 continue
             stroke = np.median(region,axis=1).astype(np.uint8)[:,None,:]
         inset = (stroke_start+layout.height_px-(dd-bottom[0]))/2

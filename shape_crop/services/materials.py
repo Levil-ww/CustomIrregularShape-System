@@ -163,6 +163,8 @@ def _prepare(material, preview):
             layout = adapt_enamel_inset(layout)
         elif pattern in ('闲叙青釉', '闲叙邂逅'):
             layout = adapt_texture_inset(layout,dark_panel_fallback=pattern=='闲叙青釉')
+        elif pattern == '青禾四锦' or source_pattern == '青禾四锦':
+            layout = adapt_outlined_texture_inset(layout, probe_side=2400, dark_texture=True)
         elif pattern in ('闲叙浅川', '闲叙素年'):
             layout = adapt_outlined_texture_inset(layout)
         return PreparedMaterial(layout.image, layout.strip, material, layout)
