@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFo
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 from shape_crop.core.geometry import CircularBand, ArcBand
+from shape_crop.core.belly_geometry import BellyOutline
 from shape_crop.gui.shape_preview import ShapePreview
 from shape_crop.workers.sketch_worker import SketchWorker
 from shape_crop.gui.manual_window import PreviewCanvas, ManualWindow
@@ -86,22 +87,17 @@ class MainWindow(QMainWindow):
         table_layout = QVBoxLayout(self.table_module)
         table_layout.setContentsMargins(0, 12, 0, 0)
         self.module_tabs.addTab(self.table_module, '圆桌 / 弧形台')
-        self.circle_module = QWidget()
-        circle_layout = QVBoxLayout(self.circle_module)
-        circle_layout.setContentsMargins(24, 24, 24, 24)
-        circle_layout.addStretch()
-        circle_title = QLabel('正圆 / 同心圆裁剪')
-        circle_title.setObjectName('sectionTitle')
-        circle_title.setAlignment(Qt.AlignCenter)
-        circle_layout.addWidget(circle_title)
-        circle_hint = QLabel('模块待开发\n\n此处预留正圆与同心圆裁剪入口。\n圆桌与弧形台排版请切换至「圆桌 / 弧形台」标签。')
-        circle_hint.setObjectName('hint')
-        circle_hint.setAlignment(Qt.AlignCenter)
-        circle_hint.setWordWrap(True)
-        circle_layout.addWidget(circle_hint)
-        circle_layout.addStretch()
-        self.module_tabs.addTab(self.circle_module, '正圆 / 同心圆（待开发）')
+        from shape_crop.gui.circle_module import CircleModule
+        self.circle_module = CircleModule()
+        self.module_tabs.addTab(self.circle_module, '正圆 / 同心圆')
+        self.belly_module = QWidget()
+        self.belly_layout = QVBoxLayout(self.belly_module)
+        self.belly_layout.setContentsMargins(0, 12, 0, 0)
+        self.module_tabs.insertTab(1, self.belly_module, '马肚形')
+        self.table_layout = table_layout
+        self.last_table_mode = 'circular'
         splitter = QSplitter(Qt.Horizontal)
+        self.workspace_splitter = splitter
         splitter.setChildrenCollapsible(False)
         table_layout.addWidget(splitter, 1)
         panel = QWidget()
@@ -170,6 +166,8 @@ class MainWindow(QMainWindow):
         self.shape_mode = QComboBox()
         self.shape_mode.addItem('圆桌（直径 + 总高）', 'circular')
         self.shape_mode.addItem('弧形台（最大宽度 + 总高 + 直边）', 'arc')
+        self.shape_mode.addItem('马肚形（A / B / C / D / 圆角）', 'belly')
+        self.shape_mode.view().setRowHidden(self.shape_mode.findData('belly'), True)
         controls.addWidget(self.shape_mode)
         controls.addWidget(QLabel('目标文件名'))
         self.target_history = QComboBox()
@@ -200,20 +198,39 @@ class MainWindow(QMainWindow):
         self.width_value = QDoubleSpinBox()
         self.height_value = QDoubleSpinBox()
         self.straight_value = PendingDimensionSpinBox()
-        for field in (self.width_value, self.height_value, self.straight_value):
+        self.belly_c = PendingDimensionSpinBox()
+        self.belly_d = PendingDimensionSpinBox()
+        self.belly_diameter = PendingDimensionSpinBox()
+        for field in (self.width_value, self.height_value, self.straight_value,
+                      self.belly_c, self.belly_d, self.belly_diameter):
             field.setRange(0, 1000)
             field.setDecimals(2)
             field.setSpecialValueText('待填写')
             field.valueChanged.connect(self.update_dimensions)
-        dimension_form.addRow('W 最大宽度 cm', self.width_value)
-        dimension_form.addRow('H 总高 cm', self.height_value)
-        dimension_form.addRow('L 直边 cm（不补偿）', self.straight_value)
+        self.width_label = QLabel('W 最大宽度 cm')
+        self.height_label = QLabel('H 总高 cm')
+        dimension_form.addRow(self.width_label, self.width_value)
+        dimension_form.addRow(self.height_label, self.height_value)
+        self.straight_label = QLabel('L 直边 cm（不补偿）')
+        dimension_form.addRow(self.straight_label, self.straight_value)
+        self.belly_fields = QWidget()
+        belly_form = QFormLayout(self.belly_fields)
+        belly_form.setContentsMargins(0, 0, 0, 0)
+        belly_form.addRow('C 上下圆角连接点间距 cm', self.belly_c)
+        belly_form.addRow('D 左右圆角连接点间距 cm', self.belly_d)
+        belly_form.addRow('圆角直径 cm', self.belly_diameter)
+        self.belly_fields.hide()
         self.straight_value.setEnabled(False)
         controls.addLayout(dimension_form)
+        controls.addWidget(self.belly_fields)
+        self.belly_hint = QLabel('马肚形示意图显示在右侧。A、B 加总尺寸补偿；C、D 和圆角直径按输入值生成。')
+        self.belly_hint.setWordWrap(True)
+        self.belly_hint.hide()
+        controls.addWidget(self.belly_hint)
         self.shape_mode.currentIndexChanged.connect(self.mode_changed)
-        upload = QPushButton('上传草图并识别尺寸')
-        upload.clicked.connect(self.choose_sketch)
-        controls.addWidget(upload)
+        self.upload = QPushButton('上传草图并识别尺寸')
+        self.upload.clicked.connect(self.choose_sketch)
+        controls.addWidget(self.upload)
         self.sketch_image = QLabel()
         self.sketch_image.setAlignment(Qt.AlignCenter)
         self.sketch_image.hide()
@@ -224,18 +241,21 @@ class MainWindow(QMainWindow):
         self.sketch_review = QCheckBox('已对照草图核对模块及尺寸')
         self.sketch_review.hide()
         controls.addWidget(self.sketch_review)
-        for field in (self.width_value, self.height_value, self.straight_value):
+        for field in (self.width_value, self.height_value, self.straight_value,
+                      self.belly_c, self.belly_d, self.belly_diameter):
             field.valueChanged.connect(lambda: self.sketch_review.setChecked(False))
         files_title = QLabel('02  素材与输出')
         files_title.setObjectName('sectionTitle')
         controls.addWidget(files_title)
         self.library = self.directory_row(controls, '矩形 JPG 素材图库', 'library_dir')
+        self.circle_module.library.setText(self.library.text())
         self.library.textChanged.connect(self.library_changed)
         refresh_library = QPushButton('刷新图库索引')
         refresh_library.setToolTip('图库断开重连或怀疑索引未同步时，重新核对目录；正常换单无需刷新')
         refresh_library.clicked.connect(self.refresh_library)
         controls.addWidget(refresh_library)
         self.output_dir = self.directory_row(controls, '输出目录', 'output_dir')
+        self.circle_module.output_dir.setText(self.output_dir.text())
         format_row = QFormLayout()
         self.format = QComboBox()
         self.format.addItems(['JPG（白底）', 'PNG（透明）'])
@@ -301,7 +321,23 @@ class MainWindow(QMainWindow):
         self.cancel.setEnabled(False)
         self.cancel.clicked.connect(self.cancel_task)
         left.addWidget(self.cancel)
+        self.module_tabs.currentChanged.connect(self.module_changed)
         self.update_dimensions()
+
+    def module_changed(self, index):
+        page = self.module_tabs.widget(index)
+        if page not in (self.table_module, self.belly_module):
+            return
+        belly = page is self.belly_module
+        if belly and self.shape_mode.currentData() != 'belly':
+            self.last_table_mode = self.shape_mode.currentData()
+        layout = self.belly_layout if belly else self.table_layout
+        layout.addWidget(self.workspace_splitter, 1)
+        self.workspace_splitter.show()
+        self.shape_mode.setVisible(not belly)
+        self.shape_mode.setCurrentIndex(self.shape_mode.findData('belly' if belly else self.last_table_mode))
+        if self.preview.original is not None:
+            self.preview_hint.setText('模块已切换 · 现有成品预览来自切换前的模块')
 
     def set_target_history(self, names):
         current_text = self.target.text()
@@ -357,7 +393,9 @@ class MainWindow(QMainWindow):
         request = ProductRequest(self.target.text().strip(), self.library.text().strip(),
                                  self.override.text().strip(), self.allowance.value(),
                                  self.dpi.value(), self.inner.value(), self.shape_mode.currentData(),
-                                 self.straight_value.value(), self.width_value.value(), self.height_value.value())
+                                 self.straight_value.value(), self.width_value.value(), self.height_value.value(),
+                                 self.belly_c.value(), self.belly_d.value(), self.belly_diameter.value(),
+                                 False)
         parse_filename(request.target_name)
         if self.sketch_path and not self.sketch_review.isChecked():
             raise ValueError('请先对照草图核对模块和尺寸，再勾选确认')
@@ -371,6 +409,10 @@ class MainWindow(QMainWindow):
             raise ValueError('请填写最大宽度和总高')
         if self.shape_mode.currentData() == 'arc':
             return ArcBand(w, h, self.straight_value.value())
+        if self.shape_mode.currentData() == 'belly':
+            BellyOutline(self.width_value.value(), self.height_value.value(), self.belly_c.value(),
+                         self.belly_d.value(), self.belly_diameter.value())
+            return BellyOutline(w, h, self.belly_c.value(), self.belly_d.value(), self.belly_diameter.value())
         return CircularBand(w, h)
 
     def target_changed(self):
@@ -380,10 +422,14 @@ class MainWindow(QMainWindow):
         self.sketch_image.hide()
         self.sketch_review.hide()
         self.sketch_review.setChecked(False)
-        fields = (self.width_value, self.height_value, self.straight_value)
+        fields = (self.width_value, self.height_value, self.straight_value,
+                  self.belly_c, self.belly_d, self.belly_diameter)
         for field in fields:
             field.blockSignals(True)
         self.straight_value.setValue(0)
+        self.belly_c.setValue(0)
+        self.belly_d.setValue(0)
+        self.belly_diameter.setValue(0)
         try:
             parsed = parse_filename(self.target.text())
             self.width_value.setValue(parsed.width_cm)
@@ -401,7 +447,16 @@ class MainWindow(QMainWindow):
         self.update_dimensions()
 
     def mode_changed(self):
-        self.straight_value.setEnabled(self.shape_mode.currentData() == 'arc')
+        mode = self.shape_mode.currentData()
+        self.straight_value.setEnabled(mode == 'arc')
+        self.straight_value.setVisible(mode != 'belly')
+        self.straight_label.setVisible(mode != 'belly')
+        self.upload.setText('上传草图供对照' if mode == 'belly' else '上传草图并识别尺寸')
+        self.belly_fields.setVisible(mode == 'belly')
+        self.belly_hint.setVisible(mode == 'belly')
+        self.width_label.setText('B 最大宽度 cm' if mode == 'belly' else 'W 最大宽度 cm')
+        self.height_label.setText('A 最大高度 cm' if mode == 'belly' else 'H 总高 cm')
+        self.outline.set_belly_mode(mode == 'belly')
         if self.sketch_path:
             self.sketch_review.setChecked(False)
         self.update_dimensions()
@@ -431,6 +486,10 @@ class MainWindow(QMainWindow):
             return
         self.sketch_image.setPixmap(pixmap.scaled(320, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         self.sketch_image.show()
+        if self.shape_mode.currentData() == 'belly':
+            self.sketch_report.setText('马肚形草图暂不支持自动关联尺寸，请对照草图手工填写 A、B、C、D 和圆角直径。')
+            self.status.setText('草图已加载，请手工填写并核对尺寸。')
+            return
         self.controls.setEnabled(False)
         self.preview_button.setEnabled(False)
         self.export_button.setEnabled(False)
@@ -444,6 +503,9 @@ class MainWindow(QMainWindow):
         self.sketch_worker.start()
 
     def sketch_result(self, result):
+        if self.shape_mode.currentData() == 'belly':
+            self.sketch_report.setText('马肚形尺寸请对照草图手工填写；自动识别尚未接入。')
+            return
         if result.width_cm is not None:
             self.width_value.setValue(result.width_cm)
         if result.height_cm is not None:
@@ -468,7 +530,7 @@ class MainWindow(QMainWindow):
         self.preview_button.setEnabled(True)
         self.export_button.setEnabled(True)
         self.cancel.setEnabled(False)
-        if self.close_pending:
+        if self.close_pending and not self.circle_module.worker:
             self.close()
 
     def update_dimensions(self):
@@ -477,6 +539,11 @@ class MainWindow(QMainWindow):
         try:
             parsed = parse_filename(self.target.text())
             shape = self.current_shape()
+            if self.shape_mode.currentData() == 'belly':
+                self.dimension_label.setText(f'马肚形（含总尺寸补偿）\nA {shape.height:g}cm · B {shape.width:g}cm\n实际 C {shape.side_span:g}cm · D {shape.horizontal_span:g}cm\n圆角直径 {shape.corner_diameter:g}cm')
+                self.outline.set_shape(shape)
+                self.output_label.setText('输出：' + parsed.stem + ('.jpg' if self.format.currentIndex() == 0 else '.png'))
+                return
             title = '最大宽度' if self.shape_mode.currentData() == 'arc' else '直径'
             conflict = ''
             if (abs(self.width_value.value() - parsed.width_cm) > .001 or
@@ -579,9 +646,12 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, '无法生成', message)
 
     def closeEvent(self, event):
-        if self.worker or self.sketch_worker:
+        if self.worker or self.sketch_worker or self.circle_module.worker:
             self.close_pending = True
             self.cancel_task()
+            if self.circle_module.worker:
+                self.circle_module.worker.requestInterruption()
+                self.circle_module.worker.finished.connect(self.close)
             event.ignore()
         else:
             if self.catalog_session:

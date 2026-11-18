@@ -18,12 +18,24 @@ def resolve_request(request, cancelled=None, status=None, catalog_session=None):
     if request.shape_mode == 'arc':
         from shape_crop.core.geometry import ArcBand
         ArcBand(width, height, request.straight_cm)
+    if request.shape_mode == 'belly':
+        from shape_crop.core.belly_geometry import BellyOutline
+        if request.belly_reference_approximation:
+            raise ValueError('马肚形必须按输入的 C、D 生成，不能使用修改尺寸的效果图近似模式')
+        BellyOutline(width, height, request.belly_c_cm, request.belly_d_cm, request.belly_corner_cm)
+        BellyOutline(width + request.allowance_cm, height + request.allowance_cm,
+                     request.belly_c_cm, request.belly_d_cm, request.belly_corner_cm)
+        if request.inner_diameter_cm:
+            raise ValueError('马肚形暂不支持同心内圆，请将内圆直径设为 0')
     target = replace(target, width_cm=width, height_cm=height)
     design = DesignSpec(diameter_cm=width + request.allowance_cm,
                         height_cm=height + request.allowance_cm, dpi=request.dpi,
                         border=BorderSpec(0, 0, 0), inner_border_cm=0,
                         inner_diameter_cm=request.inner_diameter_cm,
-                        shape_mode=request.shape_mode, straight_cm=request.straight_cm)
+                        shape_mode=request.shape_mode, straight_cm=request.straight_cm,
+                        belly_c_cm=request.belly_c_cm, belly_d_cm=request.belly_d_cm,
+                        belly_corner_cm=request.belly_corner_cm,
+                        belly_reference_approximation=request.belly_reference_approximation)
     design.validate()
     if request.material_override:
         path = request.material_override

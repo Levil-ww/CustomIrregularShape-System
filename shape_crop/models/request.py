@@ -13,3 +13,7 @@ class ProductRequest:
     straight_cm: float = 0.0
     width_cm: float | None = None
     height_cm: float | None = None
+    belly_c_cm: float = 0.0
+    belly_d_cm: float = 0.0
+    belly_corner_cm: float = 0.0
+    belly_reference_approximation: bool = False

@@ -17,7 +17,7 @@ def generate(design, preview=False, output=None, progress=None, cancelled=None, 
     if diagnostics and outer and outer.source_layout:
         layout = outer.source_layout
         report = f'布局分类：{layout.category}；{layout.report}'
-        if layout.floating_artwork is not None or layout.framed_artwork is not None:
+        if design.shape_mode != 'belly' and (layout.floating_artwork is not None or layout.framed_artwork is not None):
             from shape_crop.core.content_mapping import ContentMapping
             from shape_crop.core.geometry import create_shape
             native = ContentMapping.source_scale(layout, design.diameter_cm, design.height_cm)
@@ -43,7 +43,10 @@ def generate(design, preview=False, output=None, progress=None, cancelled=None, 
     if cancelled and cancelled():
         raise RenderCancelled('任务已取消')
     renderer = render
-    if outer and outer.source_layout:
+    if design.shape_mode == 'belly':
+        from shape_crop.core.belly_renderer import render_belly
+        renderer = render_belly
+    elif outer and outer.source_layout:
         from shape_crop.core.source_renderer import render_source
         renderer = render_source
     if status:

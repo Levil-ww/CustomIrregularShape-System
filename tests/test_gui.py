@@ -122,6 +122,83 @@ def test_arc_gui_sketch_review_and_new_order():
     app.processEvents()
 
 
+def test_belly_gui_dimensions_outline_and_snapshot(tmp_path):
+    from PIL import Image
+    from shape_crop.gui.main_window import MainWindow
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    assert [window.module_tabs.tabText(i) for i in range(window.module_tabs.count())] == [
+        '圆桌 / 弧形台', '马肚形', '正圆 / 同心圆']
+    window.target.setText('花幔;80x140cm')
+    window.shape_mode.setCurrentIndex(window.shape_mode.findData('arc'))
+    window.module_tabs.setCurrentWidget(window.belly_module)
+    assert window.shape_mode.currentData() == 'belly'
+    window.belly_c.setValue(63)
+    window.belly_d.setValue(120)
+    window.belly_diameter.setValue(15)
+    shape = window.current_shape()
+    assert (shape.width, shape.height, shape.side_span, shape.horizontal_span, shape.corner_diameter) == (141, 81, 63, 120, 15)
+    assert 'A 81cm' in window.dimension_label.text()
+    assert window.outline.belly_mode
+    window.show()
+    app.processEvents()
+    assert window.workspace_splitter.parent() is window.belly_module
+    assert not window.shape_mode.isVisible()
+    assert not window.outline.grab().isNull()
+    request = window.snapshot()
+    assert (request.shape_mode, request.belly_c_cm, request.belly_d_cm, request.belly_corner_cm) == ('belly', 63, 120, 15)
+    assert not request.belly_reference_approximation
+    assert '实际 C 63cm · D 120cm' in window.dimension_label.text()
+    sketch = tmp_path / 'sketch.png'
+    Image.new('RGB', (100, 80), 'white').save(sketch)
+    window.start_sketch(str(sketch))
+    assert window.shape_mode.currentData() == 'belly'
+    assert window.sketch_worker is None
+    assert '手工填写' in window.sketch_report.text()
+    with pytest.raises(ValueError, match='核对'):
+        window.snapshot()
+    window.sketch_review.setChecked(True)
+    assert window.snapshot().shape_mode == 'belly'
+    window.target.setText('花幔;90x150cm')
+    assert (window.belly_c.value(), window.belly_d.value(), window.belly_diameter.value()) == (0, 0, 0)
+    window.module_tabs.setCurrentWidget(window.table_module)
+    assert window.shape_mode.currentData() == 'arc'
+    assert window.workspace_splitter.parent() is window.table_module
+    window.close()
+    app.processEvents()
+
+
+def test_belly_gui_worker_generates_preview(tmp_path):
+    from test_huaman_frame import huaman_source
+    from shape_crop.gui.main_window import MainWindow
+    app = QApplication.instance() or QApplication([])
+    source = tmp_path / '花幔;80x140cm.png'
+    huaman_source().save(source)
+    window = MainWindow()
+    window.target.setText('花幔;80x140cm')
+    window.module_tabs.setCurrentWidget(window.belly_module)
+    window.belly_c.setValue(63)
+    window.belly_d.setValue(120)
+    window.belly_diameter.setValue(15)
+    window.override.setText(str(source))
+    errors = []
+    window.show_error = errors.append
+    window.start_task(True)
+    loop = QEventLoop()
+    window.worker.finished.connect(loop.quit)
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.timeout.connect(loop.quit)
+    timer.start(20000)
+    loop.exec_()
+    timer.stop()
+    assert window.worker is None
+    assert not errors
+    assert window.preview.original is not None
+    window.close()
+    app.processEvents()
+
+
 def test_manual_arc_snapshot():
     app = QApplication.instance() or QApplication([])
     window = ManualWindow()

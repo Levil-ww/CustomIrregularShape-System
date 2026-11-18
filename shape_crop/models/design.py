@@ -66,6 +66,10 @@ class DesignSpec:
     background: tuple[int, int, int] = (248, 235, 205)
     shape_mode: str = 'circular'
     straight_cm: float = 0.0
+    belly_c_cm: float = 0.0
+    belly_d_cm: float = 0.0
+    belly_corner_cm: float = 0.0
+    belly_reference_approximation: bool = False
 
     def validate(self):
         values = (self.diameter_cm, self.height_cm, self.border.margin_cm,
