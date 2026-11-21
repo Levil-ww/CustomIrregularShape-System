@@ -59,7 +59,8 @@ def test_concentric_gui_gap_direction_and_compensation(monkeypatch):
     app = QApplication.instance() or QApplication([])
     from shape_crop.gui.circle_module import CircleModule
     widget = CircleModule()
-    widget.mode.setCurrentIndex(1)
+    assert widget.mode.currentText() == '同心圆'
+    assert widget.inner.isEnabled() and widget.gap.isEnabled()
     widget.diameter.setValue(100)
     widget.inner.setValue(55)
     assert widget.snapshot()['inner_diameter'] == 56
@@ -92,6 +93,7 @@ def test_circle_gui_uses_manual_diameter_until_filename_changes(monkeypatch):
     app = QApplication.instance() or QApplication([])
     from shape_crop.gui.circle_module import CircleModule
     widget = CircleModule()
+    widget.mode.setCurrentIndex(0)
     widget.target.setText('双面格-蔓生花;140CM圆形.jpg')
     assert widget.diameter.value() == 140
     widget.diameter.setValue(145)

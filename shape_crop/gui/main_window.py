@@ -93,7 +93,7 @@ class MainWindow(QMainWindow):
         self.belly_module = QWidget()
         self.belly_layout = QVBoxLayout(self.belly_module)
         self.belly_layout.setContentsMargins(0, 12, 0, 0)
-        self.module_tabs.insertTab(1, self.belly_module, '马肚形')
+        self.module_tabs.addTab(self.belly_module, '马肚形（未完善）')
         self.table_layout = table_layout
         self.last_table_mode = 'circular'
         splitter = QSplitter(Qt.Horizontal)

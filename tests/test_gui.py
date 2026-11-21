@@ -128,7 +128,7 @@ def test_belly_gui_dimensions_outline_and_snapshot(tmp_path):
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
     assert [window.module_tabs.tabText(i) for i in range(window.module_tabs.count())] == [
-        '圆桌 / 弧形台', '马肚形', '正圆 / 同心圆']
+        '圆桌 / 弧形台', '正圆 / 同心圆', '马肚形（未完善）']
     window.target.setText('花幔;80x140cm')
     window.shape_mode.setCurrentIndex(window.shape_mode.findData('arc'))
     window.module_tabs.setCurrentWidget(window.belly_module)

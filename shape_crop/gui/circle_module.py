@@ -98,6 +98,7 @@ class CircleModule(QWidget):
         layout.addWidget(title)
         self.mode = QComboBox()
         self.mode.addItems(['正圆', '同心圆'])
+        self.mode.setCurrentIndex(1)
         self.mode.currentIndexChanged.connect(self.update_mode)
         layout.addWidget(self.mode)
         layout.addWidget(QLabel('目标文件名'))
