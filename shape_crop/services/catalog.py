@@ -62,7 +62,7 @@ def _regroup(index):
     index.groups = groups
 
 
-def _refresh_directory(index, path, cancelled):
+def _refresh_directory(index, path, cancelled, parse_entry=None):
     """Update one changed directory; descend only into newly added folders."""
     _check_cancelled(cancelled)
     if not os.path.isdir(path):
@@ -87,20 +87,20 @@ def _refresh_directory(index, path, cancelled):
     records = {name: parsed for name, parsed in old.items() if name in files}
     for name in files - previous:
         _check_cancelled(cancelled)
-        parsed = _parse_entry(name)
+        parsed = (parse_entry or _parse_entry)(name)
         if parsed:
             records[name] = parsed
     old_children = index.children.get(path, set())
     for removed in old_children - children:
-        _refresh_directory(index, removed, cancelled)
+        _refresh_directory(index, removed, cancelled, parse_entry)
     for added in children - old_children:
-        _refresh_directory(index, added, cancelled)
+        _refresh_directory(index, added, cancelled, parse_entry)
     index.stamps[path] = frozenset(names)
     index.records[path] = records
     index.children[path] = children
 
 
-def _apply_events(index, events, cancelled):
+def _apply_events(index, events, cancelled, parse_entry=None):
     """Apply native file notifications without enumerating the network directory."""
     touched, copied = {}, set()
     for action, path in events:
@@ -124,10 +124,10 @@ def _apply_events(index, events, cancelled):
                 touched.setdefault(parent, set(index.stamps[parent])).discard(name)
         elif action in (1, 5):  # added / new name of a rename
             if os.path.isdir(path):
-                _refresh_directory(index, path, cancelled)
+                _refresh_directory(index, path, cancelled, parse_entry)
                 index.children[parent] = index.children.get(parent, set()) | {path}
             elif parent in index.records:
-                parsed = _parse_entry(name)
+                parsed = (parse_entry or _parse_entry)(name)
                 if parsed:
                     if parent not in copied:
                         index.records[parent] = dict(index.records[parent])
@@ -140,9 +140,10 @@ def _apply_events(index, events, cancelled):
             index.stamps[root] = frozenset(names)
 
 
-def _catalog(directory, cancelled, progress, verify=True, changes=(), events=()):
+def _catalog(directory, cancelled, progress, verify=True, changes=(), events=(), *, parse_entry=None, namespace=None):
     """Reuse parsed names; inspect every indexed directory for additions/deletions."""
-    key = str(directory.resolve())
+    root = str(directory.resolve())
+    key = (namespace, root) if namespace else root
     with _index_lock:
         cached = _indexes.get(key)
         if cached:
@@ -163,14 +164,14 @@ def _catalog(directory, cancelled, progress, verify=True, changes=(), events=())
             if progress:
                 progress(f'正在增量更新图库：{len(events)} 个变动条目…')
             updated = CatalogIndex({}, dict(cached.stamps), dict(cached.records), dict(cached.children))
-            _apply_events(updated, events, cancelled)
+            _apply_events(updated, events, cancelled, parse_entry)
             for path in sorted(dirty, key=len):
-                _refresh_directory(updated, path, cancelled)
+                _refresh_directory(updated, path, cancelled, parse_entry)
             _regroup(updated)
             _indexes[key] = updated
             _indexes.move_to_end(key)
             return updated.groups
-        directory = Path(key)
+        directory = Path(root)
         groups, stamps, records, children, scanned = {}, {}, {}, {}, 0
         def onerror(error):
             pass
@@ -184,12 +185,12 @@ def _catalog(directory, cancelled, progress, verify=True, changes=(), events=())
             records[root] = {}
             for name in files:
                 _check_cancelled(cancelled)
-                if os.path.splitext(name)[1].lower() not in ('.jpg', '.jpeg'):
+                if os.path.splitext(name)[1].lower() not in (('.jpg', '.jpeg', '.png') if parse_entry else ('.jpg', '.jpeg')):
                     continue
                 scanned += 1
                 if progress and scanned % 1000 == 0:
                     progress(f'正在建立图库索引：已扫描 {scanned} 张 JPG…')
-                parsed = _parse_entry(name)
+                parsed = (parse_entry or _parse_entry)(name)
                 if parsed is None:
                     continue
                 records[root][name] = parsed

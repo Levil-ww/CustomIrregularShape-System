@@ -4,9 +4,9 @@ from PyQt5.QtCore import Qt, QRectF, QThread, QSettings, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
     QPushButton, QLabel, QDoubleSpinBox, QSpinBox, QComboBox, QFileDialog, QMessageBox, QSplitter,
-    QCheckBox, QGroupBox, QScrollArea)
+    QCheckBox, QGroupBox, QScrollArea, QCompleter)
 from shape_crop.gui.manual_window import PreviewCanvas
-from shape_crop.services.circle import parse_circle_name, generate_circle
+from shape_crop.services.circle import parse_circle_name, generate_circle, CircleCatalogSession
 
 
 class CircleOutline(QWidget):
@@ -35,7 +35,7 @@ class CircleOutline(QWidget):
         painter.setPen(QColor('#286c9a'))
         painter.setBrush(QColor('#e3f0f8'))
         painter.drawEllipse(QRectF(x, y, side, side))
-        if 0 < self.inner + 2 * self.gap < self.diameter:
+        if self.inner > 0 and self.inner + 2 * self.gap < self.diameter:
             hole = side * (self.inner + 2 * self.gap) / self.diameter
             offset = (side - hole) / 2
             painter.setBrush(QColor('#ffffff'))
@@ -49,6 +49,7 @@ class CircleOutline(QWidget):
 class CircleWorker(QThread):
     result = pyqtSignal(object, str)
     error = pyqtSignal(str)
+    status = pyqtSignal(str)
 
     def __init__(self, options, parent=None):
         super().__init__(parent)
@@ -56,7 +57,7 @@ class CircleWorker(QThread):
 
     def run(self):
         try:
-            image, detail = generate_circle(**self.options, cancelled=self.isInterruptionRequested)
+            image, detail = generate_circle(**self.options, cancelled=self.isInterruptionRequested, status=self.status.emit)
             self.result.emit(image if self.options['preview'] else None, detail)
         except Exception as error:
             self.error.emit(str(error))
@@ -66,6 +67,8 @@ class CircleModule(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.worker = None
+        self.catalog_session = None
+        self.settings = QSettings('ShapeCrop', 'CircularDesigner')
         self.diameter_manual = False
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 12, 0, 0)
@@ -98,23 +101,42 @@ class CircleModule(QWidget):
         self.mode.currentIndexChanged.connect(self.update_mode)
         layout.addWidget(self.mode)
         layout.addWidget(QLabel('目标文件名'))
-        self.target = QLineEdit()
+        self.target_history = QComboBox()
+        self.target_history.setEditable(True)
+        self.target_history.setInsertPolicy(QComboBox.NoInsert)
+        self.target_history.setMinimumWidth(0)
+        self.target_history.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.target_history.setMaxVisibleItems(15)
+        self.target_history.addItems(self.settings.value('circle_target_filename_history', [], type=list)[:15])
+        self.target_history.setCurrentIndex(-1)
+        self.target_history.completer().setCompletionMode(QCompleter.PopupCompletion)
+        self.target = self.target_history.lineEdit()
         self.target.setPlaceholderText('例如：双面格-蔓生花;140CM圆形裁剪有图')
-        self.target.textChanged.connect(self.read_target)
-        layout.addWidget(self.target)
+        self.target.textChanged.connect(self.target_changed)
+        target_row = QHBoxLayout()
+        target_row.addWidget(self.target_history, 1)
+        self.clear_target_history_button = QPushButton('清空历史')
+        self.clear_target_history_button.setEnabled(self.target_history.count() > 0)
+        self.clear_target_history_button.clicked.connect(self.clear_target_history)
+        target_row.addWidget(self.clear_target_history_button)
+        layout.addLayout(target_row)
         form = QFormLayout()
         layout.addLayout(form)
         self.diameter = self.number(0, 1000, 0)
+        self.diameter.setSpecialValueText('待填写')
         self.diameter.valueChanged.connect(self.mark_manual)
         form.addRow('标称外径 cm', self.diameter)
         self.auto_diameter = QPushButton('恢复文件名直径')
         self.auto_diameter.clicked.connect(self.reset_diameter)
         layout.addWidget(self.auto_diameter)
         self.inner = self.number(0, 1000, 0)
-        form.addRow('内圆实际直径 cm', self.inner)
+        form.addRow('内圆所需直径 cm', self.inner)
         self.gap = self.number(0, 1000, 0)
-        form.addRow('径向间隙 cm', self.gap)
-        hint = QLabel('外径来自目标文件名，可手工修改；同心圆的内径按实际成品尺寸填写。')
+        form.addRow('径向间隙（单边）cm', self.gap)
+        self.gap_direction = QComboBox()
+        self.gap_direction.addItems(['向外：保持内圆直径', '向内：保持空洞直径'])
+        form.addRow('间隙计算方式', self.gap_direction)
+        hint = QLabel('内圆所需直径自动增加 1 cm 补偿；径向间隙为单边距离。')
         hint.setObjectName('hint')
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -124,6 +146,10 @@ class CircleModule(QWidget):
         files = QFormLayout()
         layout.addLayout(files)
         self.library = self.path_row(files, '素材图库', True)
+        self.library.textChanged.connect(self.library_changed)
+        self.refresh_library_button = QPushButton('刷新图库索引')
+        self.refresh_library_button.clicked.connect(self.refresh_library)
+        layout.addWidget(self.refresh_library_button)
         self.output_dir = self.path_row(files, '输出目录', True)
         self.format = QComboBox()
         self.format.addItems(['JPG（白底）', 'PNG（透明）'])
@@ -209,6 +235,7 @@ class CircleModule(QWidget):
         splitter.setSizes([420, 810])
         self.inner.valueChanged.connect(self.update_size)
         self.gap.valueChanged.connect(self.update_size)
+        self.gap_direction.currentIndexChanged.connect(self.update_size)
         self.update_mode()
         self.update_size()
 
@@ -218,6 +245,45 @@ class CircleModule(QWidget):
         field.setDecimals(2)
         field.setValue(value)
         return field
+
+    def set_target_history(self, names):
+        current = self.target.text()
+        combo_blocked = self.target_history.blockSignals(True)
+        line_blocked = self.target.blockSignals(True)
+        try:
+            self.target_history.clear()
+            self.target_history.addItems(names)
+            self.target_history.setCurrentIndex(-1)
+            self.target.setText(current)
+        finally:
+            self.target.blockSignals(line_blocked)
+            self.target_history.blockSignals(combo_blocked)
+        self.clear_target_history_button.setEnabled(bool(names))
+        self.settings.setValue('circle_target_filename_history', names)
+        self.settings.sync()
+
+    def remember_target(self, name):
+        names = [self.target_history.itemText(i) for i in range(self.target_history.count())
+                 if self.target_history.itemText(i) != name]
+        self.set_target_history(([name] + names)[:15])
+
+    def clear_target_history(self):
+        self.set_target_history([])
+
+    def library_changed(self):
+        if self.catalog_session:
+            self.catalog_session.close()
+            self.catalog_session = None
+
+    def refresh_library(self):
+        if self.catalog_session:
+            self.catalog_session.request_refresh()
+        self.status.setText('已标记刷新图库，下次匹配将核对目录并更新索引')
+
+    def close_catalog(self):
+        if self.catalog_session:
+            self.catalog_session.close()
+            self.catalog_session = None
 
     def path_row(self, form, label, directory):
         row = QHBoxLayout()
@@ -238,19 +304,37 @@ class CircleModule(QWidget):
         active = self.mode.currentIndex() == 1
         self.inner.setEnabled(active)
         self.gap.setEnabled(active)
+        self.gap_direction.setEnabled(active)
         self.inner_override.setEnabled(active)
         if hasattr(self, 'size_label'):
             self.update_size()
 
     def update_size(self):
         actual = self.diameter.value() + self.allowance.value()
-        text = f'实际外径 {actual:g} cm · 标称外径 {self.diameter.value():g} cm'
+        text = (f'实际外径 {actual:g} cm · 标称外径 {self.diameter.value():g} cm'
+                if self.diameter.value() else '请填写标称外径')
         if self.mode.currentIndex():
-            text += f'\n内圆实际直径 {self.inner.value():g} cm · 径向间隙 {self.gap.value():g} cm'
+            inner = self.calculated_inner()
+            if self.inner.value() and inner > 0:
+                text += (f'\n内圆成品直径 {inner:g} cm · 空洞直径 {inner + 2 * self.gap.value():g} cm'
+                         f'\n径向间隙（单边）{self.gap.value():g} cm')
+            elif self.inner.value():
+                text += '\n内圆成品直径无效：径向间隙过大'
+            else:
+                text += '\n请填写内圆所需直径'
         self.size_label.setText(text)
         self.outline.set_dimensions(actual if self.diameter.value() else 0,
-                                    self.inner.value() if self.mode.currentIndex() else 0,
+                                    max(0, self.calculated_inner()) if self.mode.currentIndex() else 0,
                                     self.gap.value() if self.mode.currentIndex() else 0)
+
+    def calculated_inner(self):
+        if not self.inner.value():
+            return 0
+        return self.inner.value() + 1 - (2 * self.gap.value() if self.gap_direction.currentIndex() else 0)
+
+    def target_changed(self):
+        self.diameter_manual = False
+        self.read_target()
 
     def read_target(self):
         if self.diameter_manual:
@@ -262,7 +346,10 @@ class CircleModule(QWidget):
             self.diameter.blockSignals(False)
             self.update_size()
         except ValueError:
-            pass
+            self.diameter.blockSignals(True)
+            self.diameter.setValue(0)
+            self.diameter.blockSignals(False)
+            self.update_size()
 
     def mark_manual(self):
         self.diameter_manual = True
@@ -272,9 +359,11 @@ class CircleModule(QWidget):
         self.read_target()
 
     def snapshot(self):
-        inner = self.inner.value() if self.mode.currentIndex() else 0
+        inner = self.calculated_inner() if self.mode.currentIndex() else 0
+        if self.mode.currentIndex() and not self.inner.value():
+            raise ValueError('请填写同心圆的内圆所需直径')
         if self.mode.currentIndex() and inner <= 0:
-            raise ValueError('请填写同心圆的内圆实际直径')
+            raise ValueError('内圆成品直径必须大于零，请减小径向间隙')
         return dict(target_name=self.target.text().strip(), library=self.library.text().strip(),
                     diameter=self.diameter.value(), allowance=self.allowance.value(),
                     inner_diameter=inner, gap=self.gap.value() if inner else 0,
@@ -294,16 +383,20 @@ class CircleModule(QWidget):
                     raise ValueError('请选择有效的输出目录')
                 output = str(directory / (target.stem + ('.jpg' if self.format.currentIndex() == 0 else '.png')))
             options.update(preview=preview, output=output)
-            settings = QSettings('ShapeCrop', 'CircularDesigner')
-            settings.setValue('library_dir', self.library.text().strip())
-            settings.setValue('output_dir', self.output_dir.text().strip())
+            self.settings.setValue('library_dir', self.library.text().strip())
+            self.settings.setValue('output_dir', self.output_dir.text().strip())
+            if options['library'] and self.catalog_session is None:
+                self.catalog_session = CircleCatalogSession(options['library'])
+            options['catalog_session'] = self.catalog_session
             self.worker = CircleWorker(options, self)
             self.worker.result.connect(lambda image, detail: self.finished(image, detail, output))
             self.worker.error.connect(self.failed)
+            self.worker.status.connect(self.status.setText)
             self.worker.finished.connect(self.clear_worker)
             self.preview_button.setEnabled(False)
             self.export_button.setEnabled(False)
             self.status.setText('正在匹配素材并生成，请稍候…')
+            self.remember_target(options['target_name'])
             self.worker.start()
         except ValueError as error:
             QMessageBox.warning(self, '无法生成', str(error))

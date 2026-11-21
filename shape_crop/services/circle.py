@@ -9,6 +9,8 @@ from shape_crop.core.circle_composition import compose_circle
 from shape_crop.services.filename_parser import parse_filename
 from shape_crop.services.materials import load_image
 from shape_crop.services.export import save_image
+from shape_crop.services.catalog import _catalog
+from shape_crop.services.catalog_session import CatalogSession
 
 
 @dataclass(frozen=True)
@@ -22,6 +24,14 @@ class CircleName:
 @dataclass(frozen=True)
 class CircleMatch:
     path: str
+    diameter_cm: float
+    round_source: bool
+
+
+@dataclass(frozen=True)
+class CircleSource:
+    pattern: str
+    material: str
     diameter_cm: float
     round_source: bool
 
@@ -56,36 +66,64 @@ def parse_circle_name(value, require_diameter=True):
     return CircleName(stem, parts[0] if len(parts) > 1 else '', pattern, float(match.group(1) or match.group(2)) if match else 0)
 
 
-def match_circle_material(target, directory, diameter, cancelled=None):
+def _circle_entry(name):
+    if Path(name).suffix.lower() not in ('.jpg', '.jpeg', '.png'):
+        return None
+    try:
+        parsed = parse_circle_name(name)
+        return CircleSource(parsed.pattern, parsed.material, parsed.diameter_cm, True)
+    except ValueError:
+        try:
+            parsed = parse_filename(name)
+            return CircleSource(parsed.pattern, parsed.material, min(parsed.width_cm, parsed.height_cm), False)
+        except ValueError:
+            return None
+
+
+def match_circle_materials(target, directory, diameters, cancelled=None, progress=None, *, verify=True, events=()):
     if not os.path.isdir(directory):
         raise ValueError('图库目录不存在或不可访问')
-    candidates = []
-    for root, dirs, files in os.walk(directory, followlinks=False):
-        for name in files:
-            if cancelled and cancelled():
-                from shape_crop.core.renderer import RenderCancelled
-                raise RenderCancelled('任务已取消')
-            if Path(name).suffix.lower() not in ('.jpg', '.jpeg', '.png'):
-                continue
-            try:
-                parsed = parse_circle_name(name)
-                size, is_round = parsed.diameter_cm, True
-            except ValueError:
-                try:
-                    parsed = parse_filename(name)
-                    size, is_round = min(parsed.width_cm, parsed.height_cm), False
-                except ValueError:
-                    continue
-            if parsed.pattern.casefold() != target.pattern.casefold() or (target.material and parsed.material != target.material):
-                continue
-            path = str(Path(root) / name)
-            candidates.append(((not is_round, size < diameter * .8, abs(math.log(size / diameter)), path.casefold()), CircleMatch(path, size, is_round)))
+    groups = _catalog(Path(directory), cancelled, progress, verify=verify, events=events,
+                      parse_entry=_circle_entry, namespace='circle')
+    candidates = [(path, parsed) for path, parsed in groups.get(target.pattern.casefold(), ())
+                  if not target.material or parsed.material == target.material]
     if not candidates:
         raise ValueError(f'图库中未找到同材质、同花型“{target.pattern}”的素材')
-    return min(candidates, key=lambda item: item[0])[1]
+    results = []
+    for diameter in diameters:
+        path, parsed = min(candidates, key=lambda item: (not item[1].round_source,
+            item[1].diameter_cm < diameter * .8, abs(math.log(item[1].diameter_cm / diameter)), item[0].casefold()))
+        results.append(CircleMatch(path, parsed.diameter_cm, parsed.round_source))
+    return results
 
 
-def generate_circle(target_name, library, diameter, allowance, inner_diameter, gap, line_px, dpi, outer_override='', inner_override='', preview=True, output=None, cancelled=None):
+def match_circle_material(target, directory, diameter, cancelled=None):
+    return match_circle_materials(target, directory, [diameter], cancelled)[0]
+
+
+class CircleCatalogSession(CatalogSession):
+    """Maintain a circular catalog using the existing directory watcher."""
+
+    def match_many(self, target, diameters, cancelled=None, progress=None):
+        self.start()
+        with self._lock:
+            events, self._events = self._events, []
+            verify = self._verify or self._overflow or not self._active
+            self._verify = self._overflow = False
+        try:
+            matches = match_circle_materials(target, self.directory, diameters, cancelled, progress,
+                                             verify=verify, events=events)
+            if any(not os.path.isfile(match.path) for match in matches):
+                matches = match_circle_materials(target, self.directory, diameters, cancelled, progress, verify=True)
+            return matches
+        except Exception:
+            with self._lock:
+                self._events = events + self._events
+                self._verify = self._verify or verify
+            raise
+
+
+def generate_circle(target_name, library, diameter, allowance, inner_diameter, gap, line_px, dpi, outer_override='', inner_override='', preview=True, output=None, cancelled=None, catalog_session=None, status=None):
     target = parse_circle_name(target_name, require_diameter=False)
     actual = diameter + allowance
     if not all(math.isfinite(v) for v in (diameter, allowance, dpi)) or diameter <= 0 or allowance < 0 or dpi <= 0:
@@ -94,22 +132,50 @@ def generate_circle(target_name, library, diameter, allowance, inner_diameter, g
         raise ValueError('内圆直径、间隙和线宽不能为负数')
     if inner_diameter and inner_diameter + 2 * gap >= actual:
         raise ValueError('内圆直径与两侧间隙之和必须小于外圆直径')
-    def select(override, size):
-        return CircleMatch(override, size, True) if override else match_circle_material(target, library, size, cancelled)
-    outer_match = select(outer_override, actual)
-    inner_match = select(inner_override, inner_diameter) if inner_diameter else None
+    needed = ([actual] if not outer_override else []) + ([inner_diameter] if inner_diameter and not inner_override else [])
+    matches = iter((catalog_session.match_many(target, needed, cancelled, status) if catalog_session else
+                    match_circle_materials(target, library, needed, cancelled, status)) if needed else [])
+    def manual_match(path, size):
+        parsed = _circle_entry(Path(path).name)
+        if parsed is not None:
+            return CircleMatch(path, size, parsed.round_source)
+        from PIL import Image
+        try:
+            with Image.open(path) as source:
+                is_round = source.width == source.height
+        except OSError:
+            raise ValueError(f'素材文件无法打开：{path}')
+        return CircleMatch(path, size, is_round)
+    outer_match = manual_match(outer_override, actual) if outer_override else next(matches)
+    inner_match = (manual_match(inner_override, inner_diameter) if inner_override else next(matches)) if inner_diameter else None
     pixels = round(actual / 2.54 * dpi)
     render_pixels = min(pixels, 1200) if preview else pixels
     if render_pixels * render_pixels > 180_000_000:
         raise ValueError('当前导出超过 1.8 亿像素，请降低 DPI 或尺寸')
-    outer = load_image(outer_match.path, max_side=render_pixels if preview else None)
-    inner = load_image(inner_match.path, max_side=render_pixels if preview else None) if inner_match else None
+    if status:
+        status('正在读取素材…')
+    def artwork(match, size):
+        if match.round_source:
+            return load_image(match.path, max_side=render_pixels if preview else None)
+        from shape_crop.models.design import DesignSpec, MaterialSpec, BorderSpec
+        from shape_crop.services.design_service import generate
+        design = DesignSpec(diameter_cm=size, height_cm=size, dpi=dpi,
+                            border=BorderSpec(0, 0, 0), inner_border_cm=0,
+                            material=MaterialSpec(path=match.path))
+        return generate(design, preview=preview, cancelled=cancelled, status=status)
+    outer = artwork(outer_match, actual)
+    inner = (outer if inner_match and inner_match.path == outer_match.path and outer_match.round_source and inner_match.round_source else
+             artwork(inner_match, inner_diameter)) if inner_match else None
     width = max(1, round(line_px * render_pixels / pixels)) if line_px else 0
+    if status:
+        status('正在生成圆形图案…')
     image = compose_circle(outer, inner, actual, inner_diameter, gap, width, render_pixels)
     if output:
+        if status:
+            status('正在保存成品…')
         save_image(image, output, dpi)
     def description(label, match, requested_size):
-        warning = '（矩形备选，边框效果请核对）' if not match.round_source else ''
+        warning = '（矩形素材，已按圆形重建边框，请核对预览）' if not match.round_source else ''
         if match.diameter_cm < requested_size * .8:
             warning += '（素材尺寸偏小）'
         return f'{label}素材：{match.path}{warning}'

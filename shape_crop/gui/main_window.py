@@ -654,6 +654,7 @@ class MainWindow(QMainWindow):
                 self.circle_module.worker.finished.connect(self.close)
             event.ignore()
         else:
+            self.circle_module.close_catalog()
             if self.catalog_session:
                 self.catalog_session.close()
             if self.manual_window:

@@ -15,6 +15,8 @@ def compose_circle(outer, inner, diameter, inner_diameter, gap, line_px, pixels)
     if pixels * pixels > 180_000_000:
         raise ValueError('当前导出超过 1.8 亿像素，请降低 DPI 或尺寸')
     def fitted(image, side):
+        if image.mode == 'RGB':
+            return ImageOps.fit(image, (side, side), method=Image.Resampling.LANCZOS).convert('RGBA')
         return ImageOps.fit(image.convert('RGBA'), (side, side), method=Image.Resampling.LANCZOS)
     mask = Image.new('L', (pixels, pixels), 0)
     draw = ImageDraw.Draw(mask)
